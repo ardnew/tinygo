@@ -45,7 +45,7 @@ func getGorootVersion(goroot string) (int, int, error) {
 		return 0, 0, fmt.Errorf("%s: empty version", errPrefix)
 	}
 
-	if "" == s || strings.HasPrefix(s, "devel") {
+	if strings.HasPrefix(s, "devel") {
 		maj, min, err := getGorootApiVersion(goroot)
 		if nil != err {
 			return 0, 0, fmt.Errorf("%s: version API invalid: %s", errPrefix, err)
