@@ -73,10 +73,9 @@ func getGorootApiVersion(goroot string) (int, int, error) {
 	if nil != err {
 		return 0, 0, fmt.Errorf("could not read API feature directory: %s", err)
 	}
-
 	maj, min := -1, -1
 	for _, f := range info {
-		if "go" != f.Name()[:2] || f.IsDir() {
+		if !strings.HasPrefix(f.Name(), "go") || f.IsDir() {
 			continue
 		}
 		vers := strings.TrimSuffix(f.Name(), filepath.Ext(f.Name()))
