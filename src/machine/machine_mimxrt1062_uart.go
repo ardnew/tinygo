@@ -15,13 +15,12 @@ type UART struct {
 	Buffer    *RingBuffer
 	Interrupt interrupt.Interrupt
 
-	// these hold the input selector ("daisy chain") values that select which pins
-	// are connected to the LPUART device, and should be defined where the UART
-	// instance is declared. see the godoc comments on type muxSelect for more
-	// details.
-	muxRX, muxTX muxSelect
+	// These hold the input selector ("daisy chain") values of the IOMUXC
+	// controller that selects which pins are connected to the LPUART device;
+	// define these where the UART instance is declared.
+	rxMux, txMux uint8
 
-	// these are copied from UARTConfig, during (*UART).Configure(UARTConfig), and
+	// These are copied from UARTConfig, during (*UART).Configure(UARTConfig), and
 	// should be considered read-only for internal reference (i.e., modifying them
 	// will have no desirable effect).
 	rx, tx Pin
@@ -67,9 +66,8 @@ func (uart *UART) Configure(config UARTConfig) {
 	uart.rx.Configure(PinConfig{Mode: PinModeUARTRX})
 	uart.tx.Configure(PinConfig{Mode: PinModeUARTTX})
 
-	// configure the mux input selector
-	uart.muxRX.connect()
-	uart.muxTX.connect()
+	// configure the mux input selector (IOMUXC)
+	uart.configureMux()
 
 	// reset all internal logic and registers
 	uart.resetTransmitting()
@@ -205,6 +203,39 @@ func (uart *UART) WriteByte(c byte) error {
 	}
 	uart.Bus.CTRL.SetBits(nxp.LPUART_CTRL_TIE)
 	return nil
+}
+
+// configureMux configures the IOMUXC controller by selecting which UART pins
+// are connected to the receiver's LPUART device.
+// The values (rxMux/txMux) that control which pins are used by the IOMUXC
+// controller are not themselves of Pin type, but rather they are arbitrary
+// enumerations defined by the IOMUXC interface.
+func (uart *UART) configureMux() {
+	var rx, tx *volatile.Register32
+	switch uart.Bus {
+	case nxp.LPUART1:
+		// LPUART1 not connected via IOMUXC (no input select registers)
+	case nxp.LPUART2:
+		rx, tx = &nxp.IOMUXC.LPUART2_RX_SELECT_INPUT, &nxp.IOMUXC.LPUART2_TX_SELECT_INPUT
+	case nxp.LPUART3:
+		rx, tx = &nxp.IOMUXC.LPUART3_RX_SELECT_INPUT, &nxp.IOMUXC.LPUART3_TX_SELECT_INPUT
+	case nxp.LPUART4:
+		rx, tx = &nxp.IOMUXC.LPUART4_RX_SELECT_INPUT, &nxp.IOMUXC.LPUART4_TX_SELECT_INPUT
+	case nxp.LPUART5:
+		rx, tx = &nxp.IOMUXC.LPUART5_RX_SELECT_INPUT, &nxp.IOMUXC.LPUART5_TX_SELECT_INPUT
+	case nxp.LPUART6:
+		rx, tx = &nxp.IOMUXC.LPUART6_RX_SELECT_INPUT, &nxp.IOMUXC.LPUART6_TX_SELECT_INPUT
+	case nxp.LPUART7:
+		rx, tx = &nxp.IOMUXC.LPUART7_RX_SELECT_INPUT, &nxp.IOMUXC.LPUART7_TX_SELECT_INPUT
+	case nxp.LPUART8:
+		rx, tx = &nxp.IOMUXC.LPUART8_RX_SELECT_INPUT, &nxp.IOMUXC.LPUART8_TX_SELECT_INPUT
+	}
+	if nil != rx {
+		rx.Set(uint32(uart.rxMux))
+	}
+	if nil != tx {
+		tx.Set(uint32(uart.txMux))
+	}
 }
 
 // getBaudRateDivisor finds the greatest over-sampling factor (4..32) and

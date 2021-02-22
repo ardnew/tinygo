@@ -715,28 +715,6 @@ func (p Pin) getPad() (pad *volatile.Register32, mux *volatile.Register32) {
 	panic("machine: invalid pin")
 }
 
-// muxSelect is yet another level of indirection required to connect pins in an
-// alternate function state to a desired peripheral (since more than one pin can
-// provide a given alternate function).
-//
-// Once a pin is configured with a given alternate function mode, the IOMUXC
-// device must then be configured to select which alternate function pin to
-// route to the desired peripheral.
-//
-// The reference manual refers to this functionality as a "Daisy Chain". The
-// associated docs are found in the i.MX RT1060 Processor Reference Manual:
-//   "Chapter 11.3.3 Daisy chain - multi pads driving same module input pin"
-type muxSelect struct {
-	mux uint8                // AF mux selection (NOT a Pin type)
-	sel *volatile.Register32 // AF selection register
-}
-
-// connect configures the IOMUXC controller to route a given pin with alternate
-// function to a desired peripheral (see godoc comments on type muxSelect).
-func (s muxSelect) connect() {
-	s.sel.Set(uint32(s.mux))
-}
-
 // getMuxMode acts as a callback from the `(Pin).Configure(PinMode)` routine to
 // determine the alternate function setting for a given Pin and PinConfig.
 // This value is used in the IOMUXC device's SW_MUX_CTL_PAD_GPIO_* registers.
