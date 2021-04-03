@@ -17,3 +17,9 @@ func (h *host) init(port uint8) (s status) {
 
 	return statusSuccess
 }
+
+func (h *host) deinit() status {
+
+	// de-initialize host
+	return statusSuccess
+}

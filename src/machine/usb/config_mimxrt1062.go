@@ -2,6 +2,8 @@
 
 package usb
 
+const configCPUFrequencyHz = 600000000
+
 // The following constants must be defined for USB 2.0 host/device support.
 //
 // However, some or all of these constants may be unused in the core driver
@@ -17,6 +19,10 @@ const (
 
 	// configHostCount defines the number of USB host-mode ports available.
 	configHostCount = 0
+
+	// configDeviceSelfPowered defines whether the device is self-powered (1) or
+	// not (0).
+	configDeviceSelfPowered = 1
 
 	// configDeviceCDCACMCount defines the number of USB CDC-ACM interfaces
 	// to initialize; must be less-than or equal to configDeviceCount.
@@ -51,30 +57,29 @@ var (
 	configDeviceCDCACM = [configDeviceCDCACMCount]deviceCDCACMConfig{
 		{ // USB CDC-ACM [0]
 			interfaceSpeed: specSpeedFull, // USB full-speed (12 Mbit/s)
-
+			// Serial line configuration
 			lineCodingSize:       7,      // Size of line-coding message
 			lineCodingBaudRate:   115200, // Data terminal rate
 			lineCodingCharFormat: 0,      // Character format
 			lineCodingParityType: 0,      // Parity type
 			lineCodingDataBits:   8,      // Data word size
-
-			commInterfaceIndex: 0,
-			dataInterfaceIndex: 1,
-
-			interruptInEndpoint: 1,
-			bulkInEndpoint:      2,
-			bulkOutEndpoint:     3,
-
-			interruptInPacketSize: configDeviceCDCACMFSInterruptInPacketSize,
-			interruptInInterval:   configDeviceCDCACMFSInterruptInInterval,
-			bulkInPacketSize:      configDeviceCDCACMFSBulkInPacketSize,
-			bulkOutPacketSize:     configDeviceCDCACMFSBulkOutPacketSize,
+			// Communication/control interface
+			commInterfaceIndex:        0, // communication/control interface index
+			commInterruptInEndpoint:   1, // interrupt input endpoint index (address)
+			commInterruptInPacketSize: configDeviceCDCACMFSInterruptInPacketSize,
+			commInterruptInInterval:   configDeviceCDCACMFSInterruptInInterval,
+			// Data interface
+			dataInterfaceIndex:    1, // data interface index
+			dataBulkInEndpoint:    2, // bulk input endpoint index (address)
+			dataBulkInPacketSize:  configDeviceCDCACMFSBulkInPacketSize,
+			dataBulkOutEndpoint:   3, // bulk output endpoint index (address)
+			dataBulkOutPacketSize: configDeviceCDCACMFSBulkOutPacketSize,
 		},
 	}
 )
 
-// The following additional constants are not required by the USB driver, but
-// they are kept as reference for possible values of API constants above.
+// The following additional constants are not required by the USB driver but are
+// used by the usb package on this platform.
 const (
 	// USB CDC-ACM high-speed (480 Mbit/s) packet size
 	configDeviceCDCACMHSInterruptInPacketSize = 16

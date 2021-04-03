@@ -14,13 +14,14 @@ import "unsafe"
 // controller cannot be allocated for the given port.
 type (
 	deviceController interface {
-		init() status                                                        // Controller initialization
-		deinit() status                                                      // Controller de-initialization
-		interrupt()                                                          // Controller interrupt
-		send(endpointAddress uint8, buffer []uint8, length uint32) status    // Controller send data
-		receive(endpointAddress uint8, buffer []uint8, length uint32) status // Controller receive data
-		cancel(endpointAddress uint8) status                                 // Controller cancel transfer
-		control(command deviceControlID, param interface{}) status           // Controller control
+		init() status                                                // Controller initialization
+		deinit() status                                              // Controller de-initialization
+		enable(enable bool) status                                   // Controller enable runtime
+		interrupt()                                                  // Controller interrupt handler
+		send(address uint8, buffer []uint8, length uint32) status    // Controller send data
+		receive(address uint8, buffer []uint8, length uint32) status // Controller receive data
+		cancel(address uint8) status                                 // Controller cancel transfer
+		control(command deviceControlID, param interface{}) status   // Controller device control
 	}
 
 	deviceControllerCapabilitiesBitmap uint32
@@ -58,11 +59,10 @@ type (
 		dtdInvalid           uint8  // 1 (= 32 bits)
 	}
 
-	deviceControllerQHHandle *deviceControllerQH
-	deviceControllerQH       struct {
+	deviceControllerQH struct {
 		capabilities      deviceControllerCapabilitiesBitmap   // 4 (bytes)
-		currentDTDPointer deviceControllerDTDHandle            // 4
-		nextDTDPointer    deviceControllerDTDHandle            // 4
+		currentDTDPointer *deviceControllerDTD                 // 4
+		nextDTDPointer    *deviceControllerDTD                 // 4
 		dtdToken          deviceControllerDTDTokenBitmap       // 4
 		bufferPointerPage [5]uint32                            // 20
 		reserved1         uint32                               // 4
@@ -72,10 +72,9 @@ type (
 		reserved2         uint32                               // 4 (= 64 bytes)
 	}
 
-	deviceControllerDTDHandle *deviceControllerDTD
-	deviceControllerDTDList   [2 * configDeviceMaxEndpoints]deviceControllerDTDHandle
-	deviceControllerDTD       struct {
-		nextDTDPointer    deviceControllerDTDHandle            // 4 (bytes)
+	deviceControllerDTDList [2 * configDeviceMaxEndpoints]*deviceControllerDTD
+	deviceControllerDTD     struct {
+		nextDTDPointer    *deviceControllerDTD                 // 4 (bytes)
 		dtdToken          deviceControllerDTDTokenBitmap       // 4
 		bufferPointerPage [5]uint32                            // 20
 		originalBuffer    deviceControllerOriginalBufferBitmap // 4 (= 32 bytes)
@@ -83,18 +82,50 @@ type (
 )
 
 const (
-	deviceControllerQHSize  = 64 // bytes
-	deviceControllerDTDSize = 32 // bytes
 
+	// device QH
+	deviceControllerQHSize       = 64 // bytes
 	deviceControllerQHBufferSize = (configDeviceCount-1)*configDeviceControllerQHAlign +
 		2*configDeviceMaxEndpoints*2*deviceControllerQHSize
+
+	deviceControllerQHPointerMsk       = 0xFFFFFFC0
+	deviceControllerQHMultMsk          = 0xC0000000
+	deviceControllerQHZLTMsk           = 0x20000000
+	deviceControllerQHMaxPacketSizeMsk = 0x07FF0000
+	deviceControllerQHMaxPacketSize    = 0x00000800
+	deviceControllerQHIOSMsk           = 0x00008000
+
+	// device DTD
+	deviceControllerDTDSize       = 32 // bytes
 	deviceControllerDTDBufferSize = (configDeviceCount-1)*configDeviceControllerDTDAlign +
 		configDeviceControllerMaxDTD*deviceControllerDTDSize
+
+	deviceControllerDTDPointerMsk             = 0xFFFFFFE0
+	deviceControllerDTDTerminateMsk           = 0x00000001
+	deviceControllerDTDPageMsk                = 0xFFFFF000
+	deviceControllerDTDPageOffsetMsk          = 0x00000FFF
+	deviceControllerDTDPageBlock              = 0x00001000
+	deviceControllerDTDTotalBytesMsk          = 0x7FFF0000
+	deviceControllerDTDTotalBytes             = 0x00004000
+	deviceControllerDTDIOCMsk                 = 0x00008000
+	deviceControllerDTDMultIOMsk              = 0x00000C00
+	deviceControllerDTDStatusMsk              = 0x000000FF
+	deviceControllerDTDStatusErrorMsk         = 0x00000068
+	deviceControllerDTDStatusActive           = 0x00000080
+	deviceControllerDTDStatusHalted           = 0x00000040
+	deviceControllerDTDStatusDataBufferError  = 0x00000020
+	deviceControllerDTDStatusTransactionError = 0x00000008
 )
 
-func getQHBuffer(port uint8, qh int, ep int) deviceControllerQHHandle {
+var (
+	// special invalid pointer, indicating the end of a list of DTDs
+	deviceControllerDTDTerminate = (*deviceControllerDTD)(unsafe.Pointer(uintptr(
+		deviceControllerDTDTerminateMsk)))
+)
+
+func getQHBuffer(port uint8, qh int, ep int) *deviceControllerQH {
 	if port < configDeviceCount && qh < 2 && ep < 2*configDeviceMaxEndpoints {
-		return (deviceControllerQHHandle)(unsafe.Pointer(
+		return (*deviceControllerQH)(unsafe.Pointer(
 			&deviceControllerQHBuffer[int(port)*configDeviceControllerQHAlign+
 				qh*2*configDeviceMaxEndpoints*deviceControllerQHSize+
 				ep*deviceControllerQHSize]))
@@ -102,9 +133,9 @@ func getQHBuffer(port uint8, qh int, ep int) deviceControllerQHHandle {
 	return nil
 }
 
-func getDTDBuffer(port uint8, dtd int) deviceControllerDTDHandle {
+func getDTDBuffer(port uint8, dtd int) *deviceControllerDTD {
 	if port < configDeviceCount && dtd < configDeviceControllerMaxDTD {
-		return (deviceControllerDTDHandle)(unsafe.Pointer(
+		return (*deviceControllerDTD)(unsafe.Pointer(
 			&deviceControllerDTDBuffer[int(port)*configDeviceControllerDTDAlign+
 				dtd*deviceControllerDTDSize]))
 	}
@@ -143,4 +174,11 @@ func (s deviceControllerOriginalBuffer) pack() deviceControllerOriginalBufferBit
 		((uint32(s.originalBufferOffest) & 0xFFF) << 0) | // uint16 // 12 (bits)
 			((uint32(s.originalBufferLength) & 0x7FFFF) << 12) | // uint32 // 19
 			((uint32(s.dtdInvalid) & 0x1) << 31)) // uint8  // 1 (= 32 bits)
+}
+
+// cycles converts the given number of microseconds to CPU cycles for a CPU with
+// given frequency.
+//go:inline
+func cycles(microsec, cpuFreqHz uint32) uint32 {
+	return uint32((uint64(microsec) * uint64(cpuFreqHz)) / 1000000)
 }

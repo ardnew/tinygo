@@ -11,6 +11,9 @@ type (
 		receive(ep uint8, buffer []uint8, length uint32) status   // Class driver receive from endpoint
 	}
 
+	deviceEventFunc            func(ev deviceEventID, param interface{}) status
+	deviceEndpointCallbackFunc func(message deviceEndpointCallbackMessage, param interface{}) status
+
 	deviceNotificationID   uint8
 	deviceControlID        uint8
 	deviceStatusID         uint8
@@ -20,31 +23,25 @@ type (
 	deviceClassID          uint8
 	deviceClassEventID     uint8
 
-	// deviceEndpoint contains the information for a USB device endpoint.
-	deviceEndpoint struct {
-		endpointAddress uint8  // Endpoint address
-		transferType    uint8  // Endpoint transfer type
-		maxPacketSize   uint16 // Endpoint maximum packet size
-		interval        uint8  // Endpoint interval
-	}
-
 	deviceEndpointCallbackMessage struct {
 		buffer  []uint8 // Transferred buffer
 		length  uint32  // Transferred data length
 		isSetup bool    // Is in a setup phase
 	}
 
-	deviceEndpointCallback struct {
-		param  interface{} // Parameter for callback function
-		isBusy bool
+	deviceEndpointCallbackList [2 * configDeviceMaxEndpoints]deviceEndpointCallback
+	deviceEndpointCallback     struct {
+		callback deviceEndpointCallbackFunc
+		param    interface{} // Parameter for callback function
+		isBusy   bool
 	}
 
 	deviceEndpointConfig struct {
-		maxPacketSize   uint16 // Endpoint maximum packet size
-		endpointAddress uint8  // Endpoint address
-		transferType    uint8  // Endpoint transfer type
-		zlt             uint8  // ZLT flag
-		interval        uint8  // Endpoint interval
+		maxPacketSize uint16 // Endpoint maximum packet size
+		address       uint8  // Endpoint address
+		transferType  uint8  // Endpoint transfer type
+		zlt           uint8  // ZLT flag
+		interval      uint8  // Endpoint interval
 	}
 
 	deviceEndpointStatus struct {
@@ -52,12 +49,27 @@ type (
 		status  uint16 // Endpoint status (idle or stalled)
 	}
 
+	// deviceEndpoint contains the information for a USB device endpoint.
+	deviceEndpoint struct {
+		address       uint8  // Endpoint address
+		transferType  uint8  // Endpoint transfer type
+		maxPacketSize uint16 // Endpoint maximum packet size
+		interval      uint8  // Endpoint interval
+	}
+
 	// deviceInterface contains the endpoints and class-specific information for
 	// a USB device interface.
 	deviceInterface struct {
 		alternateSetting uint8            // Alternate setting number
-		endpointList     []deviceEndpoint // Endpoints of the interface
+		endpoint         []deviceEndpoint // Endpoints of the interface
 		classSpecific    interface{}      // Class specific structure handle
+	}
+
+	deviceNotification struct {
+		buffer  []uint8              // Transferred buffer
+		length  uint32               // Transferred data length
+		code    deviceNotificationID // Notification code
+		isSetup bool                 // Is in a setup phase
 	}
 
 	// deviceSetup contains the setup information for a USB device.
@@ -70,13 +82,14 @@ type (
 	}
 
 	device struct {
-		port          uint8                                                // USB port (core index)
-		controller    deviceController                                     // Controller interface
-		epCallback    [2 * configDeviceMaxEndpoints]deviceEndpointCallback // Endpoint callback function structure
-		deviceAddress uint8                                                // Current device address
-		state         deviceStateID                                        // Current device state
-		isResetting   bool                                                 // Is doing device reset or not
-		hwTick        int64                                                // (volatile) Current hw tick (ms)
+		port             uint8                      // USB port (core index)
+		controller       deviceController           // Controller interface
+		class            *deviceClass               // USB device class
+		endpointCallback deviceEndpointCallbackList // Endpoint callback function structure
+		deviceAddress    uint8                      // Current device address
+		state            deviceStateID              // Current device state
+		isResetting      bool                       // Is doing device reset or not
+		hwTick           int64                      // (volatile) Current hw tick (ms)
 	}
 
 	// deviceClassInterface contains the USB device class details, including
@@ -104,131 +117,129 @@ type (
 
 	// deviceClass contains common device class state information.
 	deviceClass struct {
-		deviceHandle      *device             // USB device handle
-		classConfig       []deviceClassConfig // USB device class configuration list
+		device            *device             // USB device handle
+		config            []deviceClassConfig // USB device class configuration list
+		event             deviceEventFunc     // application callback
 		setupBuffer       []uint8             // Setup packet data buffer
 		transcationBuffer uint16              // Get status/configuration, get/set interface, get sync frame
 	}
-	// 			This structure is used to pass the control request information.
-	// 			The structure is used in following two cases.
-	// 			1. Case one, the host wants to send data to the device in the control data stage: @n
-	// 			        a. If a setup packet is received, the structure is used to pass the setup packet data and wants to get the
-	// 			buffer to receive data sent from the host.
-	// 			           The field isSetup is 1.
-	// 			           The length is the requested buffer length.
-	// 			           The buffer is filled by the class or application by using the valid buffer address.
-	// 			           The setup is the setup packet address.
-	// 			        b. If the data received is sent by the host, the structure is used to pass the data buffer address and the
-	// 			data
-	// 			length sent by the host.
-	// 			           In this way, the field isSetup is 0.
-	// 			           The buffer is the address of the data sent from the host.
-	// 			           The length is the received data length.
-	// 			           The setup is the setup packet address. @n
-	// 			2. Case two, the host wants to get data from the device in control data stage: @n
-	// 			           If the setup packet is received, the structure is used to pass the setup packet data and wants to get the
-	// 			data buffer address to send data to the host.
-	// 			           The field isSetup is 1.
-	// 			           The length is the requested data length.
-	// 			           The buffer is filled by the class or application by using the valid buffer address.
-	// 			           The setup is the setup packet address.
-	deviceControlRequest struct {
-		setup   deviceSetup // Setup data
-		buffer  []uint8     // Buffer
-		length  uint32      // Buffer length or requested length
-		isSetup bool        // Indicates whether a setup packet is received
-	}
 
-	// deviceGetDescriptorCommon contains the result of a control request for:
-	// get descriptor common
-	deviceGetDescriptorCommon struct {
-		buffer []uint8 // Buffer
-		length uint32  // Buffer length
-	}
+	// // 			This structure is used to pass the control request information.
+	// // 			The structure is used in following two cases.
+	// // 			1. Case one, the host wants to send data to the device in the control data stage: @n
+	// // 			        a. If a setup packet is received, the structure is used to pass the setup packet data and wants to get the
+	// // 			buffer to receive data sent from the host.
+	// // 			           The field isSetup is 1.
+	// // 			           The length is the requested buffer length.
+	// // 			           The buffer is filled by the class or application by using the valid buffer address.
+	// // 			           The setup is the setup packet address.
+	// // 			        b. If the data received is sent by the host, the structure is used to pass the data buffer address and the
+	// // 			data
+	// // 			length sent by the host.
+	// // 			           In this way, the field isSetup is 0.
+	// // 			           The buffer is the address of the data sent from the host.
+	// // 			           The length is the received data length.
+	// // 			           The setup is the setup packet address. @n
+	// // 			2. Case two, the host wants to get data from the device in control data stage: @n
+	// // 			           If the setup packet is received, the structure is used to pass the setup packet data and wants to get the
+	// // 			data buffer address to send data to the host.
+	// // 			           The field isSetup is 1.
+	// // 			           The length is the requested data length.
+	// // 			           The buffer is filled by the class or application by using the valid buffer address.
+	// // 			           The setup is the setup packet address.
+	// deviceControlRequest struct {
+	// 	setup   deviceSetup // Setup data
+	// 	buffer  []uint8     // Buffer
+	// 	length  uint32      // Buffer length or requested length
+	// 	isSetup bool        // Indicates whether a setup packet is received
+	// }
 
-	// deviceGetDeviceDescriptor contains the result of a control request for:
-	// get device descriptor
-	deviceGetDeviceDescriptor struct {
-		buffer []uint8 // Buffer
-		length uint32  // Buffer length
-	}
+	// // deviceGetDescriptorCommon contains the result of a control request for:
+	// // get descriptor common
+	// deviceGetDescriptorCommon struct {
+	// 	buffer []uint8 // Buffer
+	// 	length uint32  // Buffer length
+	// }
 
-	// deviceGetDeviceQualifierDescriptor contains the result of a control
-	// request for: get device qualifier descriptor
-	deviceGetDeviceQualifierDescriptor struct {
-		buffer []uint8 // Buffer
-		length uint32  // Buffer length
-	}
+	// // deviceGetDeviceDescriptor contains the result of a control request for:
+	// // get device descriptor
+	// deviceGetDeviceDescriptor struct {
+	// 	buffer []uint8 // Buffer
+	// 	length uint32  // Buffer length
+	// }
 
-	// deviceGetConfigurationDescriptor contains the result of a control request
-	// for: get configuration descriptor
-	deviceGetConfigurationDescriptor struct {
-		buffer        []uint8 // Buffer
-		length        uint32  // Buffer length
-		configuration uint8   // The configuration number
-	}
+	// // deviceGetDeviceQualifierDescriptor contains the result of a control
+	// // request for: get device qualifier descriptor
+	// deviceGetDeviceQualifierDescriptor struct {
+	// 	buffer []uint8 // Buffer
+	// 	length uint32  // Buffer length
+	// }
 
-	// deviceGetBOSDescriptor contains the result of a control request for: get
-	// bos descriptor
-	deviceGetBOSDescriptor struct {
-		buffer []uint8 // Buffer
-		length uint32  // Buffer length
-	}
+	// // deviceGetConfigurationDescriptor contains the result of a control request
+	// // for: get configuration descriptor
+	// deviceGetConfigurationDescriptor struct {
+	// 	buffer        []uint8 // Buffer
+	// 	length        uint32  // Buffer length
+	// 	configuration uint8   // The configuration number
+	// }
 
-	// deviceGetStringDescriptor contains the result of a control request for:
-	// get string descriptor
-	deviceGetStringDescriptor struct {
-		buffer      []uint8 // Buffer
-		length      uint32  // Buffer length
-		languageID  uint16  // Language ID
-		stringIndex uint8   // String index
-	}
+	// // deviceGetBOSDescriptor contains the result of a control request for: get
+	// // bos descriptor
+	// deviceGetBOSDescriptor struct {
+	// 	buffer []uint8 // Buffer
+	// 	length uint32  // Buffer length
+	// }
 
-	// deviceGetHIDDescriptor contains the result of a control request for: get
-	// HID descriptor
-	deviceGetHIDDescriptor struct {
-		buffer          []uint8 // Buffer
-		length          uint32  // Buffer length
-		interfaceNumber uint8   // The interface number
-	}
+	// // deviceGetStringDescriptor contains the result of a control request for:
+	// // get string descriptor
+	// deviceGetStringDescriptor struct {
+	// 	buffer      []uint8 // Buffer
+	// 	length      uint32  // Buffer length
+	// 	languageID  uint16  // Language ID
+	// 	stringIndex uint8   // String index
+	// }
 
-	// deviceGetHIDReportDescriptor contains the result of a control request for:
-	// get HID report descriptor
-	deviceGetHIDReportDescriptor struct {
-		buffer          []uint8 // Buffer
-		length          uint32  // Buffer length
-		interfaceNumber uint8   // The interface number
-	}
+	// // deviceGetHIDDescriptor contains the result of a control request for: get
+	// // HID descriptor
+	// deviceGetHIDDescriptor struct {
+	// 	buffer          []uint8 // Buffer
+	// 	length          uint32  // Buffer length
+	// 	interfaceNumber uint8   // The interface number
+	// }
 
-	// deviceGetHIDPhysicalDescriptor contains the result of a control request
-	// for: get HID physical descriptor
-	deviceGetHIDPhysicalDescriptor struct {
-		buffer          []uint8 // Buffer
-		length          uint32  // Buffer length
-		index           uint8   // Physical index
-		interfaceNumber uint8   // The interface number
-	}
+	// // deviceGetHIDReportDescriptor contains the result of a control request for:
+	// // get HID report descriptor
+	// deviceGetHIDReportDescriptor struct {
+	// 	buffer          []uint8 // Buffer
+	// 	length          uint32  // Buffer length
+	// 	interfaceNumber uint8   // The interface number
+	// }
 
-	deviceCallbackMessage struct {
-		buffer  []uint8              // Transferred buffer
-		length  uint32               // Transferred data length
-		code    deviceNotificationID // Notification code
-		isSetup bool                 // Is in a setup phase
-	}
+	// // deviceGetHIDPhysicalDescriptor contains the result of a control request
+	// // for: get HID physical descriptor
+	// deviceGetHIDPhysicalDescriptor struct {
+	// 	buffer          []uint8 // Buffer
+	// 	length          uint32  // Buffer length
+	// 	index           uint8   // Physical index
+	// 	interfaceNumber uint8   // The interface number
+	// }
+
 )
 
 // Unexported enumerated constant values for USB device.
 const (
-	deviceNotifyBusReset          deviceNotificationID = iota + 1 // Reset signal detected
-	deviceNotifySuspend                                           // Suspend signal detected
-	deviceNotifyResume                                            // Resume signal detected
-	deviceNotifyLPMSleep                                          // LPM signal detected
-	deviceNotifyLPMResume                                         // Resume signal detected
-	deviceNotifyError                                             // Errors happened in bus
-	deviceNotifyDetach                                            // Device disconnected from a host
-	deviceNotifyAttach                                            // Device connected to a host
-	deviceNotifyDCDDetectFinished                                 // Device charger detection finished
+	deviceNotifyBusReset          deviceNotificationID = iota + 0x10 // Reset signal detected
+	deviceNotifySuspend                                              // Suspend signal detected
+	deviceNotifyResume                                               // Resume signal detected
+	deviceNotifyLPMSleep                                             // LPM signal detected
+	deviceNotifyLPMResume                                            // Resume signal detected
+	deviceNotifyError                                                // Errors happened in bus
+	deviceNotifyDetach                                               // Device disconnected from a host
+	deviceNotifyAttach                                               // Device connected to a host
+	deviceNotifyDCDDetectFinished                                    // Device charger detection finished
+)
 
+const (
 	deviceControlRun                 deviceControlID = iota // Enable the device functionality
 	deviceControlStop                                       // Disable the device functionality
 	deviceControlEndpointInit                               // Initialize a specified endpoint
@@ -253,7 +264,9 @@ const (
 	deviceControlDCDEnable                                  // enable dcd module function.
 	deviceControlPreSetDeviceAddress                        // Pre set device address
 	deviceControlUpdateHwTick                               // update hardware tick
+)
 
+const (
 	deviceStatusTestMode       deviceStatusID = iota + 1 // Test mode
 	deviceStatusSpeed                                    // Current speed
 	deviceStatusOTG                                      // OTG status
@@ -268,17 +281,23 @@ const (
 	deviceStatusBusResume                                // Bus resume
 	deviceStatusRemoteWakeup                             // Remote wakeup state
 	deviceStatusBusSleepResume                           // Bus resume
+)
 
+const (
 	deviceStateConfigured deviceStateID = iota // Device state, Configured
 	deviceStateAddress                         // Device state, Address
 	deviceStateDefault                         // Device state, Default
 	deviceStateAddressing                      // Device state, Address setting
 	deviceStateTestMode                        // Device state, Test mode
 	deviceStateInit                            // Device state, initializing
+)
 
+const (
 	deviceEndpointStateIdle    deviceEndpointStatusID = iota // Endpoint state, idle
 	deviceEndpointStateStalled                               // Endpoint state, stalled
+)
 
+const (
 	deviceEventBusReset                     deviceEventID = iota + 1 // USB bus reset signal detected
 	deviceEventSuspend                                               // USB bus suspend signal detected
 	deviceEventResume                                                // USB bus resume signal detected. The resume signal is driven by itself or a host
@@ -303,7 +322,9 @@ const (
 	deviceEventGetInterface                                          // Get current interface alternate setting value
 	deviceEventSetBHNPEnable                                         // Enable or disable BHNP.
 	deviceEventDCDDetectionfinished                                  // The DCD detection finished
+)
 
+const (
 	deviceClassInvalid deviceClassID = iota
 	deviceClassHID
 	deviceClassCDC
@@ -314,7 +335,9 @@ const (
 	deviceClassPrinter
 	deviceClassDFU
 	deviceClassCCID
+)
 
+const (
 	deviceClassEventInvalid deviceClassEventID = iota
 	deviceClassEventClassRequest
 	deviceClassEventDeviceReset
@@ -332,25 +355,30 @@ func (d *device) init(port uint8) (s status) {
 
 	// initialize device
 	d.port = port
-	d.controller = d.initController()
+	d.controller = d.initController() // obtain a device controller handle
 	d.deviceAddress = 0
 	d.state = deviceStateDefault
 	d.isResetting = false
 	d.hwTick = 0
-	for i := range d.epCallback {
-		d.epCallback[i].param = nil
-		d.epCallback[i].isBusy = false
+	for i := range d.endpointCallback {
+		d.endpointCallback[i].callback = nil
+		d.endpointCallback[i].param = nil
+		d.endpointCallback[i].isBusy = false
 	}
 
 	// initialize platform via device controller interface
 	return d.controller.init()
 }
 
-func (d *device) notification(message *deviceCallbackMessage) {
+func (d *device) deinit() status {
 
+	// de=initialize device
+	s := d.controller.deinit()
+	d.controller = nil
+	return s
 }
 
-func (d *device) class(config []deviceClassConfig) *deviceClass {
+func (d *device) initClass(config []deviceClassConfig, event deviceEventFunc) *deviceClass {
 
 	// verify a device configuration was provided
 	if nil == d || nil == config || len(config) == 0 {
@@ -360,20 +388,169 @@ func (d *device) class(config []deviceClassConfig) *deviceClass {
 	c := &deviceClassInstance[d.port]
 
 	// initialize device class
-	c.deviceHandle = d
-	c.classConfig = config
+	c.device = d
+	c.config = config
+	c.event = event
 	c.setupBuffer = nil // TODO
 	c.transcationBuffer = 0
 
+	// add a class reference to the receiver
+	d.class = c
+
 	// initialze each of the device class drivers
-	for i := range c.classConfig {
-		if nil != c.classConfig[i].driver {
-			if !c.classConfig[i].driver.init(d, &c.classConfig[i]).OK() {
+	for i := range c.config {
+		if nil != c.config[i].driver {
+			if !c.config[i].driver.init(d, &c.config[i]).OK() {
 				// remove the driver from configuration if it fails initialization
-				c.classConfig[i].driver = nil
+				c.config[i].driver = nil
 			}
 		}
 	}
 
 	return c
+}
+
+func (d *device) initControlPipes() status {
+
+	addrIn, addrOut :=
+		uint8(specEndpointControl|specDescriptorEndpointAddressDirectionIn),
+		uint8(specEndpointControl|specDescriptorEndpointAddressDirectionOut)
+
+	if s := d.initEndpoint(
+		deviceEndpointConfig{
+			maxPacketSize: configDeviceControllerMaxPacketSize,
+			address:       addrIn,
+			transferType:  specEndpointControl,
+			zlt:           1,
+			interval:      0,
+		},
+		deviceEndpointCallback{
+			callback: d.controlEndpoint,
+			param:    d.class,
+		},
+	); !s.OK() {
+		return s
+	}
+
+	if s := d.initEndpoint(
+		deviceEndpointConfig{
+			maxPacketSize: configDeviceControllerMaxPacketSize,
+			address:       addrOut,
+			transferType:  specEndpointControl,
+			zlt:           1,
+			interval:      0,
+		},
+		deviceEndpointCallback{
+			callback: d.controlEndpoint,
+			param:    d.class,
+		},
+	); !s.OK() {
+		_ = d.deinitEndpoint(addrIn)
+		return s
+	}
+
+	return statusSuccess
+}
+
+func (d *device) initEndpoint(config deviceEndpointConfig, callback deviceEndpointCallback) status {
+
+	endpoint, direction := unpackEndpoint(config.address)
+
+	if endpoint >= configDeviceMaxEndpoints {
+		return statusInvalidParameter
+	}
+
+	d.endpointCallback[(endpoint<<1)|direction].callback = callback.callback
+	d.endpointCallback[(endpoint<<1)|direction].param = callback.param
+	d.endpointCallback[(endpoint<<1)|direction].isBusy = false
+
+	return d.controller.control(deviceControlEndpointInit, config)
+}
+
+func (d *device) deinitEndpoint(address uint8) status {
+
+	s := d.controller.control(deviceControlEndpointDeinit, address)
+
+	endpoint, direction := unpackEndpoint(address)
+
+	if endpoint >= configDeviceMaxEndpoints {
+		return statusInvalidParameter
+	}
+
+	d.endpointCallback[(endpoint<<1)|direction].callback = nil
+	d.endpointCallback[(endpoint<<1)|direction].param = nil
+	d.endpointCallback[(endpoint<<1)|direction].isBusy = false
+
+	return s
+}
+
+func (d *device) controlEndpoint(message deviceEndpointCallbackMessage, param interface{}) status {
+	return statusSuccess
+}
+
+func (d *device) event(ev deviceEventID, param interface{}) {
+
+	switch ev {
+	case deviceEventBusReset:
+		// initialize control pipes
+		d.initControlPipes()
+
+		// notify all classes of a bus reset signal
+		for i := range d.class.config {
+			_ = d.class.config[i].driver.event(deviceClassEventDeviceReset, d.class)
+		}
+	}
+	// notify the application driver of all events
+	if nil != d.class.event {
+		_ = d.class.event(ev, param)
+	}
+}
+
+func (d *device) notify(message deviceNotification) {
+
+	switch message.code {
+	case deviceNotifyBusReset:
+		d.notifyReset(message)
+
+	default:
+		endpoint, direction := unpackEndpoint(uint8(message.code))
+
+		if endpoint < configDeviceMaxEndpoints {
+			if nil != d.endpointCallback[(endpoint<<1)|direction].callback {
+				if message.isSetup {
+					d.endpointCallback[0].isBusy = false
+					d.endpointCallback[1].isBusy = false
+				} else {
+					d.endpointCallback[(endpoint<<1)|direction].isBusy = false
+				}
+				// call endpoint callback
+				_ = d.endpointCallback[(endpoint<<1)|direction].callback(
+					deviceEndpointCallbackMessage{
+						buffer:  message.buffer,
+						length:  message.length,
+						isSetup: message.isSetup,
+					},
+					d.endpointCallback[(endpoint<<1)|direction].param,
+				)
+			}
+		}
+	}
+}
+
+func (d *device) notifyReset(message deviceNotification) {
+
+	d.isResetting = true
+	_ = d.controller.control(deviceControlSetDefaultStatus, nil)
+
+	d.state = deviceStateDefault
+	d.deviceAddress = 0
+
+	for count := 0; count < 2*configDeviceMaxEndpoints; count++ {
+		d.endpointCallback[count].callback = nil
+		d.endpointCallback[count].param = nil
+		d.endpointCallback[count].isBusy = false
+	}
+
+	d.event(deviceEventBusReset, nil)
+	d.isResetting = false
 }

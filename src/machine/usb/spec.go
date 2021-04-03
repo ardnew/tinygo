@@ -1,7 +1,8 @@
 package usb
 
+// Constants defined per USB 2.0 specification.
 const (
-	// USB speed (the value cannot be changed because EHCI QH use the value directly)
+	// USB speed
 	specSpeedFull  = 0x00
 	specSpeedLow   = 0x01
 	specSpeedHigh  = 0x02
@@ -13,7 +14,7 @@ const (
 	specEndpointBulk        = 0x02
 	specEndpointInterrupt   = 0x03
 
-	// USB standard descriptor transfer direction (cannot change the value because iTD use the value directly)
+	// USB standard descriptor transfer direction
 	specOut = 0
 	specIn  = 1
 
@@ -29,7 +30,7 @@ const (
 	specDescriptorLengthDeviceCapabilityUSB20Extension = 0x07
 	specDescriptorLengthDeviceCapabilitySuperspeed     = 0x0A
 
-	// USB Device Capability Type Codes
+	// USB device capability type codes
 	specDescriptorTypeDeviceCapabilityWireless       = 0x01
 	specDescriptorTypeDeviceCapabilityUSB20Extension = 0x02
 	specDescriptorTypeDeviceCapabilitySuperspeed     = 0x03
@@ -86,7 +87,7 @@ const (
 	specRequestStandardSetInterface     = 0x0B
 	specRequestStandardSynchFrame       = 0x0C
 
-	// USB standard request GET Status
+	// USB standard request: GET status
 	specRequestStandardGetStatusDeviceSelfPoweredPos  = 0
 	specRequestStandardGetStatusDeviceRemoteWakeupPos = 1
 
@@ -95,7 +96,7 @@ const (
 
 	specRequestStandardGetStatusOTGStatusSelector = 0xF000
 
-	// USB standard request CLEAR/SET feature
+	// USB standard request: CLEAR/SET feature
 	specRequestStandardFeatureSelectorEndpointHalt       = 0
 	specRequestStandardFeatureSelectorDeviceRemoteWakeup = 1
 	specRequestStandardFeatureSelectorDeviceTestMode     = 2
@@ -103,7 +104,7 @@ const (
 	specRequestStandardFeatureSelectorAHNPSupport        = 4
 	specRequestStandardFeatureSelectorAAltHNPSupport     = 5
 
-	// USB standard descriptor configure bmAttributes
+	// USB standard descriptor: configure attributes
 	specDescriptorConfigureAttributeD7Msk = 0x80
 	specDescriptorConfigureAttributeD7Pos = 7
 
@@ -113,43 +114,66 @@ const (
 	specDescriptorConfigureAttributeRemoteWakeupMsk = 0x20
 	specDescriptorConfigureAttributeRemoteWakeupPos = 5
 
-	// USB standard descriptor endpoint bmAttributes
+	// USB standard descriptor: endpoint attributes
 	specDescriptorEndpointAddressDirectionMsk = 0x80
 	specDescriptorEndpointAddressDirectionPos = 7
 	specDescriptorEndpointAddressDirectionOut = 0
 	specDescriptorEndpointAddressDirectionIn  = 0x80
 
-	specDescriptorEndpointAddressNumberMsk   = 0x0F
-	specDescriptorEndpointAddressNumberShfit = 0
+	specDescriptorEndpointAddressNumberMsk = 0x0F
+	specDescriptorEndpointAddressNumberPos = 0
 
-	specDescriptorEndpointAttributeTypeMsk     = 0x03
-	specDescriptorEndpointAttributeNumberShfit = 0
+	specDescriptorEndpointAttributeTypeMsk   = 0x03
+	specDescriptorEndpointAttributeNumberPos = 0
 
 	specDescriptorEndpointAttributeSyncTypeMsk      = 0x0C
-	specDescriptorEndpointAttributeSyncTypeShfit    = 2
+	specDescriptorEndpointAttributeSyncTypePos      = 2
 	specDescriptorEndpointAttributeSyncTypeNoSync   = 0x00
 	specDescriptorEndpointAttributeSyncTypeAsync    = 0x04
 	specDescriptorEndpointAttributeSyncTypeAdaptive = 0x08
 	specDescriptorEndpointAttributeSyncTypeSync     = 0x0C
 
 	specDescriptorEndpointAttributeUsageTypeMsk                          = 0x30
-	specDescriptorEndpointAttributeUsageTypeShfit                        = 4
+	specDescriptorEndpointAttributeUsageTypePos                          = 4
 	specDescriptorEndpointAttributeUsageTypeDataEndpoint                 = 0x00
 	specDescriptorEndpointAttributeUsageTypeFeedbackEndpoint             = 0x10
 	specDescriptorEndpointAttributeUsageTypeImplicitFeedbackDataEndpoint = 0x20
 
-	specDescriptorEndpointMaxpacketsizeSizeMsk               = 0x07FF
-	specDescriptorEndpointMaxpacketsizeMultTransactionsMsk   = 0x1800
-	specDescriptorEndpointMaxpacketsizeMultTransactionsShfit = 11
+	specDescriptorEndpointMaxpacketsizeSizeMsk             = 0x07FF
+	specDescriptorEndpointMaxpacketsizeMultTransactionsMsk = 0x1800
+	specDescriptorEndpointMaxpacketsizeMultTransactionsPos = 11
 
-	// USB standard descriptor otg bmAttributes
+	// USB standard descriptor: OTG attributes
 	specDescriptorOTGAttributesSRPMsk = 0x01
 	specDescriptorOTGAttributesHNPMsk = 0x02
 	specDescriptorOTGAttributesADPMsk = 0x04
 
-	// USB standard descriptor device capability usb20 extension bmAttributes
+	// USB standard descriptor: device capability attributes (USB 2.0 extension)
 	specDescriptorDeviceCapabilityUSB20ExtensionLPMMsk  = 0x02
 	specDescriptorDeviceCapabilityUSB20ExtensionLPMPos  = 1
 	specDescriptorDeviceCapabilityUSB20ExtensionBESLMsk = 0x04
 	specDescriptorDeviceCapabilityUSB20ExtensionBESLPos = 2
 )
+
+//go:inline
+func unpackEndpoint(address uint8) (number, direction uint8) {
+	return (address & specDescriptorEndpointAddressNumberMsk) >>
+			specDescriptorEndpointAddressNumberPos,
+		(address & specDescriptorEndpointAddressDirectionMsk) >>
+			specDescriptorEndpointAddressDirectionPos
+}
+
+// u32LE returns a slice containing the 4 bytes from the given uint32 value.
+//
+// The returned bytes have little-endian ordering; that is, the first element
+// at index 0 is the least-significant byte in value, index 1 is the second-to-
+// least-significant byte, and so on.
+//go:inline
+func u32LE(value uint32) []uint8 {
+	return []uint8{
+		uint8((value & 0x000000FF) >> 0),
+		uint8((value & 0x0000FF00) >> 8),
+		uint8((value & 0x00FF0000) >> 16),
+		uint8((value & 0xFF000000) >> 24),
+	}
+}

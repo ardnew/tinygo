@@ -2,12 +2,17 @@
 
 package usb
 
+// Implementation of a port controller for USB device mode on NXP iMXRT1062.
+
 import (
+	"device/arm"
 	"device/nxp"
 	"runtime/interrupt"
 	"unsafe"
 )
 
+// deviceControl represents a USB device controller for NXP iMXRT1062.
+// It implements the USB API's deviceController interface.
 type deviceControl struct {
 	port   uint8
 	device *device
@@ -16,20 +21,22 @@ type deviceControl struct {
 	bus           *nxp.USB_Type
 	phy           *nxp.USBPHY_Type
 	nc            *nxp.USBNC_Type
-	qh            deviceControllerQHHandle  // The QH structure base address
-	dtd           deviceControllerDTDHandle // The DTD structure base address
-	dtdFree       deviceControllerDTDHandle // The idle DTD list head
-	dtdHead       deviceControllerDTDList   // The transferring DTD list head for each endpoint
-	dtdTail       deviceControllerDTDList   // The transferring DTD list tail for each endpoint
-	dtdCount      uint8                     // The idle DTD node count
-	endpointCount uint8                     // The endpoint number of EHCI
-	isResetting   bool                      // Whether a PORT reset is occurring or not
-	controllerId  uint8                     // Controller ID
-	speed         uint8                     // Current speed of EHCI
-	isSuspending  bool                      // Is suspending of the PORT
+	qh            *deviceControllerQH     // The QH structure base address
+	dtd           *deviceControllerDTD    // The DTD structure base address
+	dtdFree       *deviceControllerDTD    // The idle DTD list head
+	dtdHead       deviceControllerDTDList // The transferring DTD list head for each endpoint
+	dtdTail       deviceControllerDTDList // The transferring DTD list tail for each endpoint
+	dtdCount      uint8                   // The idle DTD node count
+	endpointCount uint8                   // The endpoint number of EHCI
+	isResetting   bool                    // Whether a PORT reset is occurring or not
+	controllerId  uint8                   // Controller ID
+	speed         uint8                   // Current speed of EHCI
+	isSuspending  bool                    // Is suspending of the PORT
 }
 
 var (
+	// deviceControlInstance holds instances for all USB device controllers
+	// available on the platform.
 	deviceControlInstance [configDeviceCount]deviceControl
 
 	//go:align 2048
@@ -38,6 +45,20 @@ var (
 	deviceControllerDTDBuffer [deviceControllerDTDBufferSize]uint8
 )
 
+// We cannot use the sleep timer from this context (import cycle), but we need
+// an approximate method to spin CPU cycles for short periods of time.
+//go:inline
+func delayMicrosec(microsec uint32) {
+	n := cycles(microsec, configCPUFrequencyHz)
+	for i := uint32(0); i < n; i++ {
+		arm.Asm(`nop`)
+	}
+}
+
+// initController returns a deviceController for the receiver USB device.
+// It allocates the registers and installs/enables an interrupt handler for
+// the receiver USB device. It also initializes the shared buffers used by the
+// USB controller hardware.
 func (d *device) initController() deviceController {
 
 	dc := &deviceControlInstance[d.port]
@@ -65,9 +86,9 @@ func (d *device) initController() deviceController {
 	}
 
 	// get base address of QH and DTD buffers
-	dc.qh = (deviceControllerQHHandle)(unsafe.Pointer(
+	dc.qh = (*deviceControllerQH)(unsafe.Pointer(
 		&deviceControllerQHBuffer[int(d.port)*configDeviceControllerQHAlign]))
-	dc.dtd = (deviceControllerDTDHandle)(unsafe.Pointer(
+	dc.dtd = (*deviceControllerDTD)(unsafe.Pointer(
 		&deviceControllerDTDBuffer[int(d.port)*configDeviceControllerDTDAlign]))
 
 	dc.irq.SetPriority(configInterruptPriority)
@@ -76,6 +97,7 @@ func (d *device) initController() deviceController {
 	return dc
 }
 
+// init initializes the USB device subsystem for the receiver deviceControl.
 func (dc *deviceControl) init() status {
 
 	// reset the controller
@@ -102,40 +124,49 @@ func (dc *deviceControl) deinit() status {
 	return statusSuccess
 }
 
+func (dc *deviceControl) enable(enable bool) status {
+	if enable {
+		// ensure D+ pulled down long enough for host to detect previous disconnect
+		delayMicrosec(5000)
+		return dc.control(deviceControlRun, nil)
+	}
+	// TODO: handle disabling
+	return statusSuccess
+}
+
+// interrupt is the base interrupt handler for all USB device interrupts.
 func (dc *deviceControl) interrupt() {
 
-	// mask interrupts with enabled bits
+	// read and clear the interrupts that fired
 	status := dc.bus.USBSTS.Get() & dc.bus.USBINTR.Get()
-
-	// clear interrupts
 	dc.bus.USBSTS.Set(status)
 
-	if 0 != (status & nxp.USB_USBSTS_URI_Msk) { // Reset
-		dc.interruptReset()
+	if 0 != (status & nxp.USB_USBSTS_URI_Msk) { // USB reset
+		dc.reset()
 	}
 
-	if 0 != (status & nxp.USB_USBSTS_UI_Msk) { // Token done
-		dc.interruptTokenDone()
+	if 0 != (status & nxp.USB_USBSTS_UI_Msk) { // USB token done
+		dc.tokenDone()
 	}
 
-	if 0 != (status & nxp.USB_USBSTS_PCI_Msk) { // Port status change
-		dc.interruptPortChange()
+	if 0 != (status & nxp.USB_USBSTS_PCI_Msk) { // USB port status change
+		dc.portChange()
 	}
 
-	if 0 != (status & nxp.USB_USBSTS_SRI_Msk) { // Sof
-		dc.interruptSof()
+	if 0 != (status & nxp.USB_USBSTS_SRI_Msk) { // USB start of frame (SOF)
+		dc.frameStart()
 	}
 }
 
-func (dc *deviceControl) send(endpointAddress uint8, buffer []uint8, length uint32) status {
+func (dc *deviceControl) send(address uint8, buffer []uint8, length uint32) status {
 	return statusSuccess
 }
 
-func (dc *deviceControl) receive(endpointAddress uint8, buffer []uint8, length uint32) status {
+func (dc *deviceControl) receive(address uint8, buffer []uint8, length uint32) status {
 	return statusSuccess
 }
 
-func (dc *deviceControl) cancel(endpointAddress uint8) status {
+func (dc *deviceControl) cancel(address uint8) status {
 	return statusSuccess
 }
 
@@ -147,6 +178,85 @@ func (dc *deviceControl) control(command deviceControlID, param interface{}) (s 
 	switch command {
 	case deviceControlRun:
 		dc.bus.USBCMD.SetBits(nxp.USB_USBCMD_RS)
+
+	case deviceControlStop:
+		dc.bus.USBCMD.ClearBits(nxp.USB_USBCMD_RS)
+
+	case deviceControlEndpointInit:
+		config, ok := param.(deviceEndpointConfig)
+		if !ok {
+			return statusInvalidParameter
+		}
+		s = dc.initEndpoint(config)
+
+	case deviceControlEndpointDeinit:
+		address, ok := param.(uint8)
+		if !ok {
+			return statusInvalidParameter
+		}
+		s = dc.deinitEndpoint(address)
+
+	case deviceControlEndpointStall:
+		address, ok := param.(uint8)
+		if !ok {
+			return statusInvalidParameter
+		}
+		s = dc.stallEndpoint(address)
+
+	case deviceControlEndpointUnstall:
+		address, ok := param.(uint8)
+		if !ok {
+			return statusInvalidParameter
+		}
+		s = dc.unstallEndpoint(address)
+
+	case deviceControlGetDeviceStatus:
+		// param should be a pointer to uint16, acting as output parameter.
+		status, ok := param.(*uint16)
+		if !ok {
+			return statusInvalidController
+		}
+		// configDeviceSelfPowered is a configuration constant on iMXRT1062
+		*status = configDeviceSelfPowered <<
+			specRequestStandardGetStatusDeviceSelfPoweredPos
+
+	case deviceControlGetEndpointStatus:
+		// TODO
+
+	case deviceControlPreSetDeviceAddress:
+		address, ok := param.(uint8)
+		if !ok {
+			return statusInvalidController
+		}
+		dc.bus.DEVICEADDR.Set((uint32(address) << nxp.USB_DEVICEADDR_USBADR_Pos) |
+			nxp.USB_DEVICEADDR_USBADRA_Msk)
+
+	case deviceControlSetDeviceAddress:
+		// TODO
+
+	case deviceControlGetSynchFrame:
+		return statusNotSupported
+
+	case deviceControlSetDefaultStatus:
+		for i := uint8(0); i < configDeviceMaxEndpoints; i++ {
+			_ = dc.deinitEndpoint(i | specDescriptorEndpointAddressDirectionIn)
+			_ = dc.deinitEndpoint(i | specDescriptorEndpointAddressDirectionOut)
+		}
+		s = dc.resetState()
+
+	case deviceControlGetSpeed:
+		// param should be a pointer to uint8, acting as output parameter.
+		speed, ok := param.(*uint8)
+		if !ok {
+			return statusInvalidController
+		}
+		*speed = dc.speed
+
+	case deviceControlGetOTGStatus:
+		return statusNotSupported
+
+	case deviceControlSetOTGStatus:
+		return statusNotSupported
 	}
 
 	return
@@ -169,18 +279,20 @@ func (dc *deviceControl) resetState() status {
 	// disable setup lockout
 	dc.bus.USBMODE.SetBits(nxp.USB_USBMODE_SLOM_Msk)
 
-	// use little endianness
+	// use little-endianness
 	dc.bus.USBMODE.ClearBits(nxp.USB_USBMODE_ES_Msk)
 
 	for i := 0; i < 2*configDeviceMaxEndpoints; i++ {
 		qh := getQHBuffer(dc.port, 0, i)
-		(*qh).capabilities = deviceControllerCapabilities{
-			maxPacketSize: configDeviceControllerMaxPacketSize,
-		}.pack()
-		(*qh).endpointStatus = deviceControllerEndpointStatus{
-			isOpened: 0,
-		}.pack()
-		(*qh).nextDTDPointer = (deviceControllerDTDHandle)(unsafe.Pointer(uintptr(1)))
+		(*qh).capabilities =
+			deviceControllerCapabilities{
+				maxPacketSize: configDeviceControllerMaxPacketSize,
+			}.pack()
+		(*qh).endpointStatus =
+			deviceControllerEndpointStatus{
+				isOpened: 0,
+			}.pack()
+		(*qh).nextDTDPointer = deviceControllerDTDTerminate
 		dc.dtdHead[i] = nil
 		dc.dtdTail[i] = nil
 	}
@@ -189,7 +301,7 @@ func (dc *deviceControl) resetState() status {
 
 	dc.bus.DEVICEADDR.Set(0)
 
-	// enable interrupts: enable, error, port change detect, reset
+	// enable interrupts: bus enable, bus error, port change detect, bus reset
 	dc.bus.USBINTR.Set(nxp.USB_USBINTR_UE_Msk | nxp.USB_USBINTR_UEE_Msk |
 		nxp.USB_USBINTR_PCE_Msk | nxp.USB_USBINTR_URE_Msk)
 
@@ -198,43 +310,54 @@ func (dc *deviceControl) resetState() status {
 	return statusSuccess
 }
 
-func (dc *deviceControl) interruptReset() {
+func (dc *deviceControl) reset() {
 
 	// clear setup flag
-	status := dc.bus.ENDPTSETUPSTAT.Get()
-	dc.bus.ENDPTSETUPSTAT.Set(status)
+	dc.bus.ENDPTSETUPSTAT.Set(dc.bus.ENDPTSETUPSTAT.Get())
 	// clear endpoint complete flag
-	status = dc.bus.ENDPTCOMPLETE.Get()
-	dc.bus.ENDPTCOMPLETE.Set(status)
+	dc.bus.ENDPTCOMPLETE.Set(dc.bus.ENDPTCOMPLETE.Get())
 
-	flush := true
-	for flush {
+	for {
 		// flush the pending transfers
 		dc.bus.ENDPTFLUSH.Set(nxp.USB_ENDPTFLUSH_FERB_Msk | nxp.USB_ENDPTFLUSH_FETB_Msk)
-		flush = dc.bus.ENDPTPRIME.HasBits(nxp.USB_ENDPTPRIME_PERB_Msk | nxp.USB_ENDPTPRIME_PETB_Msk)
+		if dc.bus.ENDPTPRIME.HasBits(nxp.USB_ENDPTPRIME_PERB_Msk | nxp.USB_ENDPTPRIME_PETB_Msk) {
+			break
+		}
 	}
 
-	// if port reset, set flag; otherwise, notify device class
+	// set receiver flag if port reset bit is set; otherwise, notify device class.
 	if dc.bus.PORTSC1.HasBits(nxp.USB_PORTSC1_PR_Msk) {
 		dc.isResetting = true
 	} else {
-		dc.device.notification(&deviceCallbackMessage{
-			buffer:  nil,
-			code:    deviceNotifyBusReset,
-			length:  0,
-			isSetup: false,
-		})
+		// send reset notification to common device
+		dc.device.notify(deviceNotification{code: deviceNotifyBusReset})
 	}
 }
 
-func (dc *deviceControl) interruptTokenDone() {
+func (dc *deviceControl) tokenDone() {
 
 }
 
-func (dc *deviceControl) interruptPortChange() {
+func (dc *deviceControl) portChange() {
 
 }
 
-func (dc *deviceControl) interruptSof() {
+func (dc *deviceControl) frameStart() {
 
+}
+
+func (dc *deviceControl) initEndpoint(config deviceEndpointConfig) status {
+	return statusSuccess
+}
+
+func (dc *deviceControl) deinitEndpoint(address uint8) status {
+	return statusSuccess
+}
+
+func (dc *deviceControl) stallEndpoint(address uint8) status {
+	return statusSuccess
+}
+
+func (dc *deviceControl) unstallEndpoint(address uint8) status {
+	return statusSuccess
 }

@@ -61,13 +61,17 @@ func (uart *UART) Configure(config UARTConfig) error {
 	}
 
 	// apply the CDC-ACM configuration to our port
-	uart.acmHandle, uart.classHandle = port.setCDCACM()
+	uart.acmHandle, uart.classHandle = port.initCDCACM(uart.event)
 
 	// enable USB device mode functionality, which allows a host to enumerate us
-	status = port.device.controller.control(deviceControlRun, nil)
+	status = port.device.controller.enable(true)
 	if !status.OK() {
 		return status
 	}
 
 	return nil
+}
+
+func (uart *UART) event(ev deviceEventID, param interface{}) status {
+	return statusSuccess
 }
