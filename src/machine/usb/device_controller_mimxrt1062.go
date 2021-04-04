@@ -8,6 +8,7 @@ import (
 	"device/arm"
 	"device/nxp"
 	"runtime/interrupt"
+	"runtime/volatile"
 	"unsafe"
 )
 
@@ -17,6 +18,9 @@ type deviceControl struct {
 	port   uint8
 	device *device
 	irq    interrupt.Interrupt
+
+	interruptMask uintptr            // interrupt state upon entering critical section
+	criticalState volatile.Register8 // set to 1 if in critical section, else 0
 
 	bus           *nxp.USB_Type
 	phy           *nxp.USBPHY_Type
@@ -262,6 +266,28 @@ func (dc *deviceControl) control(command deviceControlID, param interface{}) (s 
 	return
 }
 
+func (dc *deviceControl) critical(enter bool) status {
+	if enter {
+		// check if critical section already locked
+		if dc.criticalState.Get() != 0 {
+			return statusRetry
+		}
+		// lock critical section
+		dc.criticalState.Set(1)
+		// disable interrupts, storing state in receiver
+		dc.interruptMask = arm.DisableInterrupts()
+	} else {
+		// ensure critical section is locked
+		if dc.criticalState.Get() != 0 {
+			// re-enable interrupts, using state stored in receiver
+			arm.EnableInterrupts(dc.interruptMask)
+			// unlock critical section
+			dc.criticalState.Set(0)
+		}
+	}
+	return statusSuccess
+}
+
 func (dc *deviceControl) resetState() status {
 
 	dc.dtdFree = dc.dtd
@@ -317,12 +343,9 @@ func (dc *deviceControl) reset() {
 	// clear endpoint complete flag
 	dc.bus.ENDPTCOMPLETE.Set(dc.bus.ENDPTCOMPLETE.Get())
 
-	for {
-		// flush the pending transfers
+	// flush any pending transfers
+	for dc.bus.ENDPTPRIME.HasBits(nxp.USB_ENDPTPRIME_PERB_Msk | nxp.USB_ENDPTPRIME_PETB_Msk) {
 		dc.bus.ENDPTFLUSH.Set(nxp.USB_ENDPTFLUSH_FERB_Msk | nxp.USB_ENDPTFLUSH_FETB_Msk)
-		if dc.bus.ENDPTPRIME.HasBits(nxp.USB_ENDPTPRIME_PERB_Msk | nxp.USB_ENDPTPRIME_PETB_Msk) {
-			break
-		}
 	}
 
 	// set receiver flag if port reset bit is set; otherwise, notify device class.

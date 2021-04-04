@@ -147,12 +147,12 @@ type (
 	// // 			           The length is the requested data length.
 	// // 			           The buffer is filled by the class or application by using the valid buffer address.
 	// // 			           The setup is the setup packet address.
-	// deviceControlRequest struct {
-	// 	setup   deviceSetup // Setup data
-	// 	buffer  []uint8     // Buffer
-	// 	length  uint32      // Buffer length or requested length
-	// 	isSetup bool        // Indicates whether a setup packet is received
-	// }
+	deviceControlRequest struct {
+		setup   deviceSetup // Setup data
+		buffer  []uint8     // Buffer
+		length  uint32      // Buffer length or requested length
+		isSetup bool        // Indicates whether a setup packet is received
+	}
 
 	// // deviceGetDescriptorCommon contains the result of a control request for:
 	// // get descriptor common
@@ -537,6 +537,88 @@ func (d *device) notify(message deviceNotification) {
 	}
 }
 
+func (d *device) status(deviceStatus deviceStatusID, param interface{}) status {
+
+	if nil == param {
+		return statusInvalidParameter
+	}
+
+	switch deviceStatus {
+	case deviceStatusSpeed:
+		return d.controller.control(deviceControlGetSpeed, param)
+
+	case deviceStatusOTG:
+		return d.controller.control(deviceControlGetOTGStatus, param)
+
+	case deviceStatusDeviceState:
+		if state, ok := param.(*deviceStateID); ok {
+			*state = d.state
+			return statusSuccess
+		}
+		return statusInvalidParameter
+
+	case deviceStatusAddress:
+		if address, ok := param.(*uint8); ok {
+			*address = d.deviceAddress
+			return statusSuccess
+		}
+		return statusInvalidParameter
+
+	case deviceStatusDevice:
+		return d.controller.control(deviceControlGetDeviceStatus, param)
+
+	case deviceStatusEndpoint:
+		return d.controller.control(deviceControlGetEndpointStatus, param)
+
+	case deviceStatusSynchFrame:
+		return d.controller.control(deviceControlGetSynchFrame, param)
+
+	default:
+		return statusInvalidParameter
+	}
+}
+
+func (d *device) setStatus(deviceStatus deviceStatusID, param interface{}) status {
+
+	switch deviceStatus {
+	case deviceStatusOTG:
+		return d.controller.control(deviceControlSetOTGStatus, param)
+
+	case deviceStatusDeviceState:
+		if state, ok := param.(deviceStateID); ok {
+			d.state = state
+			return statusSuccess
+		}
+		return statusInvalidParameter
+
+	case deviceStatusAddress:
+		if d.state != deviceStateAddressing {
+			if address, ok := param.(uint8); ok {
+				d.deviceAddress = address
+				d.state = deviceStateAddressing
+				return d.controller.control(deviceControlPreSetDeviceAddress, d.deviceAddress)
+			}
+			return statusInvalidParameter
+		}
+		return d.controller.control(deviceControlSetDeviceAddress, d.deviceAddress)
+
+	case deviceStatusBusResume:
+		return d.controller.control(deviceControlResume, param)
+
+	case deviceStatusBusSleepResume:
+		return d.controller.control(deviceControlSleepResume, param)
+
+	case deviceStatusBusSuspend:
+		return d.controller.control(deviceControlSuspend, param)
+
+	case deviceStatusBusSleep:
+		return d.controller.control(deviceControlSleep, param)
+
+	default:
+		return statusInvalidParameter
+	}
+}
+
 func (d *device) notifyReset(message deviceNotification) {
 
 	d.isResetting = true
@@ -553,4 +635,8 @@ func (d *device) notifyReset(message deviceNotification) {
 
 	d.event(deviceEventBusReset, nil)
 	d.isResetting = false
+}
+
+func (d *device) busSpeed(speed *uint8) status {
+	return d.status(deviceStatusSpeed, speed)
 }

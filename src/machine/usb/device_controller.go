@@ -22,6 +22,7 @@ type (
 		receive(address uint8, buffer []uint8, length uint32) status // Controller receive data
 		cancel(address uint8) status                                 // Controller cancel transfer
 		control(command deviceControlID, param interface{}) status   // Controller device control
+		critical(enter bool) status                                  // Controller critical section
 	}
 
 	deviceControllerCapabilitiesBitmap uint32

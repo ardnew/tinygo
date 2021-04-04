@@ -1,5 +1,7 @@
 package usb
 
+import "bytes"
+
 type (
 	deviceCDCACMEventID uint8
 
@@ -32,23 +34,22 @@ type (
 	}
 
 	deviceCDCACM struct {
-		device      *device            // The handle of the USB device.
-		config      *deviceClassConfig // The class configure structure.
-		comm        *deviceInterface   // The CDC communication interface handle.
-		data        *deviceInterface   // The CDC data interface handle.
-		bulkIn      deviceCDCACMPipe   // The bulk in pipe for sending packet to host.
-		bulkOut     deviceCDCACMPipe   // The bulk out pipe for receiving packet from host.
-		interruptIn deviceCDCACMPipe   // The interrupt in pipe for notifying the device state to host.
-		//configuration   uint8              // The current configuration value.
-		interfaceNumber uint8  // The current interface number.
-		alternate       uint8  // The alternate setting value of the interface.
-		hasSentState    bool   // The device has primed the state in interrupt pipe
-		speed           uint8  // Speed of USB device (Full/Low/High)
-		lineCodingSize  uint32 // Size of line-coding message
-		baudRate        uint32 // Data terminal rate
-		charFormat      uint32 // Character format
-		parityType      uint32 // Parity type
-		dataBits        uint32 // Data word size
+		device          *device            // The handle of the USB device.
+		config          *deviceClassConfig // The class configure structure.
+		comm            *deviceInterface   // The CDC communication interface handle.
+		data            *deviceInterface   // The CDC data interface handle.
+		bulkIn          deviceCDCACMPipe   // The bulk in pipe for sending packet to host.
+		bulkOut         deviceCDCACMPipe   // The bulk out pipe for receiving packet from host.
+		interruptIn     deviceCDCACMPipe   // The interrupt in pipe for notifying the device state to host.
+		interfaceNumber uint8              // The current interface number.
+		alternate       uint8              // The alternate setting value of the interface.
+		hasSentState    bool               // The device has primed the state in interrupt pipe
+		speed           uint8              // Speed of USB device (Full/Low/High)
+		lineCodingSize  uint32             // Size of line-coding message
+		baudRate        uint32             // Data terminal rate
+		charFormat      uint32             // Character format
+		parityType      uint32             // Parity type
+		dataBits        uint32             // Data word size
 	}
 
 	deviceCDCACMRequestParam struct {
@@ -136,7 +137,6 @@ func (acm *deviceCDCACM) init(device *device, config *deviceClassConfig) status 
 	acm.dataBits = configDeviceCDCACM[device.port].lineCodingDataBits
 
 	// initialize remaining state data
-	// acm.configuration = 0
 	acm.alternate = 0xFF
 
 	return statusSuccess
@@ -251,7 +251,6 @@ func (acm *deviceCDCACM) event(event deviceClassEventID, param interface{}) (s s
 	switch event {
 	case deviceClassEventDeviceReset:
 		// bus reset, clear the selected configuration
-		// acm.configuration = 0
 		acm.config = nil
 
 	case deviceClassEventSetConfiguration:
@@ -304,21 +303,283 @@ func (acm *deviceCDCACM) event(event deviceClassEventID, param interface{}) (s s
 		}
 
 	case deviceClassEventSetEndpointHalt:
+		// verify parameter and fields
+		if address, ok := param.(uint8); ok {
+			if nil != acm.config && nil != acm.comm && nil != acm.data {
+				// check if given endpoint is a communication/control endpoint
+				for _, e := range acm.comm.endpoint {
+					if address == e.address {
+						// found endpoint, set stall flag
+						acm.interruptIn.pipeStall = true
+						// notify device controller
+						c := acm.device.controller.control(deviceControlEndpointStall, address)
+						if s.OK() && !c.OK() {
+							s = c
+						}
+					}
+				}
+				// check if given endpoint is a data endpoint
+				for _, e := range acm.data.endpoint {
+					if address == e.address {
+						_, direction := unpackEndpoint(address)
+						// found endpoint, set stall flag
+						if specIn == direction {
+							acm.bulkIn.pipeStall = true
+						} else {
+							acm.bulkOut.pipeStall = true
+						}
+						// notify device controller
+						c := acm.device.controller.control(deviceControlEndpointStall, address)
+						if s.OK() && !c.OK() {
+							s = c
+						}
+					}
+				}
+			} else {
+				s = statusInvalidHandle
+			}
+		} else {
+			// unexpected parameter, should be uint8 (endpoint address)
+			s = statusInvalidParameter
+		}
 
 	case deviceClassEventClearEndpointHalt:
-
+		// verify parameter and fields
+		if address, ok := param.(uint8); ok {
+			if nil != acm.config && nil != acm.comm && nil != acm.data {
+				// check if given endpoint is a communication/control endpoint
+				for _, e := range acm.comm.endpoint {
+					if address == e.address {
+						// found endpoint, notify device controller
+						c := acm.device.controller.control(deviceControlEndpointUnstall, address)
+						if s.OK() && !c.OK() {
+							s = c
+						}
+						_, direction := unpackEndpoint(address)
+						if specIn == direction {
+							// flush any buffered data written to the stalled endpoint
+							if acm.interruptIn.pipeStall {
+								// clear stall flag
+								acm.interruptIn.pipeStall = false
+								// verify the buffer has valid data
+								if !bytes.Equal(acm.interruptIn.pipeDataBuffer, deviceCDCACMBufferInvalid32) {
+									// transmit
+									u := acm.device.controller.send(
+										acm.interruptIn.ep,
+										acm.interruptIn.pipeDataBuffer,
+										acm.interruptIn.pipeDataLen)
+									if !u.OK() {
+										// notify upper layer driver of communication/control event
+										_ = acm.interruptInEvent(
+											deviceEndpointCallbackMessage{
+												buffer:  acm.interruptIn.pipeDataBuffer,
+												length:  acm.interruptIn.pipeDataLen,
+												isSetup: false,
+											},
+											acm,
+										)
+										if s.OK() {
+											s = u
+										}
+									}
+									// clear the stalled endpoint buffer
+									acm.interruptIn.pipeDataBuffer = deviceCDCACMBufferInvalid32
+									acm.interruptIn.pipeDataLen = 0
+								}
+							}
+						}
+					}
+				}
+				// check if given endpoint is a data endpoint
+				for _, e := range acm.data.endpoint {
+					if address == e.address {
+						// found endpoint, notify device controller
+						c := acm.device.controller.control(deviceControlEndpointUnstall, address)
+						if s.OK() && !c.OK() {
+							s = c
+						}
+						// check if endpoint is an input or output
+						_, direction := unpackEndpoint(address)
+						if specIn == direction {
+							// flush any buffered data written to the stalled endpoint
+							if acm.bulkIn.pipeStall {
+								// clear stall flag
+								acm.bulkIn.pipeStall = false
+								// verify the buffer has valid data
+								if !bytes.Equal(acm.bulkIn.pipeDataBuffer, deviceCDCACMBufferInvalid32) {
+									// transmit
+									u := acm.device.controller.send(
+										acm.bulkIn.ep,
+										acm.bulkIn.pipeDataBuffer,
+										acm.bulkIn.pipeDataLen)
+									if !u.OK() {
+										// notify upper layer driver of data input event
+										_ = acm.bulkInEvent(
+											deviceEndpointCallbackMessage{
+												buffer:  acm.bulkIn.pipeDataBuffer,
+												length:  acm.bulkIn.pipeDataLen,
+												isSetup: false,
+											},
+											acm,
+										)
+										if s.OK() {
+											s = u
+										}
+									}
+									// clear the stalled endpoint buffer
+									acm.bulkIn.pipeDataBuffer = deviceCDCACMBufferInvalid32
+									acm.bulkIn.pipeDataLen = 0
+								}
+							}
+						} else {
+							// flush any buffered data read from the stalled endpoint
+							if acm.bulkOut.pipeStall {
+								// clear stall flag
+								acm.bulkOut.pipeStall = false
+								// verify the buffer has valid data
+								if !bytes.Equal(acm.bulkOut.pipeDataBuffer, deviceCDCACMBufferInvalid32) {
+									// receive
+									u := acm.device.controller.receive(
+										acm.bulkOut.ep,
+										acm.bulkOut.pipeDataBuffer,
+										acm.bulkOut.pipeDataLen)
+									if !u.OK() {
+										// notify upper layer driver of data output event
+										_ = acm.bulkOutEvent(
+											deviceEndpointCallbackMessage{
+												buffer:  acm.bulkOut.pipeDataBuffer,
+												length:  acm.bulkOut.pipeDataLen,
+												isSetup: false,
+											},
+											acm,
+										)
+										if s.OK() {
+											s = u
+										}
+									}
+									// clear the stalled endpoint buffer
+									acm.bulkOut.pipeDataBuffer = deviceCDCACMBufferInvalid32
+									acm.bulkOut.pipeDataLen = 0
+								}
+							}
+						}
+					}
+				}
+			} else {
+				s = statusInvalidHandle
+			}
+		} else {
+			// unexpected parameter, should be uint8 (endpoint address)
+			s = statusInvalidParameter
+		}
 	case deviceClassEventClassRequest:
-
+		// verify parameter and fields
+		if request, ok := param.(deviceControlRequest); ok {
+			// verify requested interface is receiver's interface and request is CDC
+			if (request.setup.wIndex&0xFF) != uint16(acm.interfaceNumber) ||
+				(request.setup.bmRequestType&specRequestTypeTypeMsk) != specRequestTypeTypeClass {
+				// construct standard parameter to be passed on to upper layer drivevr
+				param := deviceCDCACMRequestParam{
+					buffer:         &request.buffer,
+					length:         &request.length,
+					interfaceIndex: request.setup.wIndex,
+					setupValue:     request.setup.wValue,
+					isSetup:        request.isSetup,
+				}
+				// translate request code to event code
+				var event deviceClassEventID
+				switch request.setup.bRequest {
+				case deviceCDCRequestSendEncapsulatedCommand:
+					event = deviceCDCACMEventSendEncapsulatedCommand
+				case deviceCDCRequestGetEncapsulatedResponse:
+					event = deviceCDCACMEventGetEncapsulatedResponse
+				case deviceCDCRequestSetCommFeature:
+					event = deviceCDCACMEventSetCommFeature
+				case deviceCDCRequestGetCommFeature:
+					event = deviceCDCACMEventGetCommFeature
+				case deviceCDCRequestClearCommFeature:
+					event = deviceCDCACMEventClearCommFeature
+				case deviceCDCRequestGetLineCoding:
+					event = deviceCDCACMEventGetLineCoding
+				case deviceCDCRequestSetLineCoding:
+					event = deviceCDCACMEventSetLineCoding
+				case deviceCDCRequestSetControlLineState:
+					event = deviceCDCACMEventSetControlLineState
+				case deviceCDCRequestSendBreak:
+					event = deviceCDCACMEventSendBreak
+				default:
+					s = statusInvalidRequest
+				}
+				// notify request to upper layer driver
+				s = acm.config.driver.event(event, param)
+			} else {
+				s = statusInvalidRequest
+			}
+		} else {
+			s = statusInvalidParameter
+		}
 	}
 
 	return s
 }
 
 func (acm *deviceCDCACM) send(ep uint8, buffer []uint8, length uint32) status {
+	var pipe *deviceCDCACMPipe
+	// select which endpoint pipe to write into
+	switch ep {
+	case acm.interruptIn.ep:
+		pipe = &acm.interruptIn
+	case acm.bulkIn.ep:
+		pipe = &acm.bulkIn
+	default:
+		return statusInvalidParameter
+	}
+	if pipe.isBusy {
+		return statusBusy
+	}
+	// set pipe busy flag
+	pipe.isBusy = true
+	// check if pipe stall flag is set
+	if pipe.pipeStall {
+		// write data to pipe buffer
+		pipe.pipeDataBuffer = buffer
+		pipe.pipeDataLen = length
+		return statusSuccess
+	}
+	// pass data to device controller for transmission
+	if s := acm.device.controller.send(ep, buffer, length); !s.OK() {
+		pipe.isBusy = false
+		return s
+	}
 	return statusSuccess
 }
 
 func (acm *deviceCDCACM) receive(ep uint8, buffer []uint8, length uint32) status {
+	var pipe *deviceCDCACMPipe
+	// select which endpoint pipe to read from
+	switch ep {
+	case acm.bulkOut.ep:
+		pipe = &acm.bulkOut
+	default:
+		return statusInvalidParameter
+	}
+	if pipe.isBusy {
+		return statusBusy
+	}
+	// set pipe busy flag
+	pipe.isBusy = true
+	// check if pipe stall flag is set
+	if pipe.pipeStall {
+		// write data to pipe buffer
+		pipe.pipeDataBuffer = buffer
+		pipe.pipeDataLen = length
+		return statusSuccess
+	}
+	// pass data to device controller for reception
+	if s := acm.device.controller.receive(ep, buffer, length); !s.OK() {
+		pipe.isBusy = false
+		return s
+	}
 	return statusSuccess
 }
 
@@ -350,20 +611,20 @@ func (acm *deviceCDCACM) endpointInterface(direction, transferType uint8) (
 	case specEndpointInterrupt:
 		switch direction {
 		case specIn:
-			return &acm.interruptIn, acm.comm, acm.interruptInCallback
+			return &acm.interruptIn, acm.comm, acm.interruptInEvent
 		}
 	case specEndpointBulk:
 		switch direction {
 		case specIn:
-			return &acm.bulkIn, acm.data, acm.bulkInCallback
+			return &acm.bulkIn, acm.data, acm.bulkInEvent
 		case specOut:
-			return &acm.bulkOut, acm.data, acm.bulkOutCallback
+			return &acm.bulkOut, acm.data, acm.bulkOutEvent
 		}
 	}
 	return nil, nil, nil
 }
 
-func (acm *deviceCDCACM) interruptInCallback(message deviceEndpointCallbackMessage, param interface{}) status {
+func (acm *deviceCDCACM) interruptInEvent(message deviceEndpointCallbackMessage, param interface{}) status {
 	if a, ok := param.(*deviceCDCACM); ok {
 		a.interruptIn.isBusy = false
 		if nil != a.config && nil != a.config.driver {
@@ -374,7 +635,7 @@ func (acm *deviceCDCACM) interruptInCallback(message deviceEndpointCallbackMessa
 	return statusInvalidParameter
 }
 
-func (acm *deviceCDCACM) bulkInCallback(message deviceEndpointCallbackMessage, param interface{}) status {
+func (acm *deviceCDCACM) bulkInEvent(message deviceEndpointCallbackMessage, param interface{}) status {
 	if a, ok := param.(*deviceCDCACM); ok {
 		a.bulkIn.isBusy = false
 		if nil != a.config && nil != a.config.driver {
@@ -385,7 +646,7 @@ func (acm *deviceCDCACM) bulkInCallback(message deviceEndpointCallbackMessage, p
 	return statusInvalidParameter
 }
 
-func (acm *deviceCDCACM) bulkOutCallback(message deviceEndpointCallbackMessage, param interface{}) status {
+func (acm *deviceCDCACM) bulkOutEvent(message deviceEndpointCallbackMessage, param interface{}) status {
 	if a, ok := param.(*deviceCDCACM); ok {
 		a.bulkOut.isBusy = false
 		if nil != a.config && nil != a.config.driver {
