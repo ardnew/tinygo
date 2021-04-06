@@ -18,11 +18,27 @@ type (
 		deinit() status                                              // Controller de-initialization
 		enable(enable bool) status                                   // Controller enable runtime
 		interrupt()                                                  // Controller interrupt handler
+		process() status                                             // Controller process interrupts
 		send(address uint8, buffer []uint8, length uint32) status    // Controller send data
 		receive(address uint8, buffer []uint8, length uint32) status // Controller receive data
 		cancel(address uint8) status                                 // Controller cancel transfer
 		control(command deviceControlID, param interface{}) status   // Controller device control
 		critical(enter bool) status                                  // Controller critical section
+	}
+
+	// deviceControllerInterruptQueue represents a fixed-length, circular queue
+	// (FIFO) of interrupts.
+	//
+	// The enqueue and dequeue operations (methods enq and deq, respectively) are
+	// NOT interrupt-/thread-safe. The user must protect against race conditions
+	// using appropriate resources for their system. For example, the interface
+	// method (deviceController).critical(bool) implements the concept of critical
+	// sections, which could be used to prevent concurrent accesses.
+	// This restriction also applies to the higher-level methods fill and drain.
+	deviceControllerInterruptQueue struct {
+		queue [configInterruptQueueSize]uintptr // circular queue
+		head  int
+		count int
 	}
 
 	deviceControllerCapabilitiesBitmap uint32
@@ -123,6 +139,73 @@ var (
 	deviceControllerDTDTerminate = (*deviceControllerDTD)(unsafe.Pointer(uintptr(
 		deviceControllerDTDTerminateMsk)))
 )
+
+// enq enqueues the given mask into tail position of the receiver iq's queue,
+// increasing queue length by 1.
+//
+// When the queue fills to capacity, any subsequent enqueue will overwrite the
+// current head with the given value, positioning its following element at the
+// front of the queue, and leaves queue length unaffected.
+func (iq *deviceControllerInterruptQueue) enq(mask uintptr) {
+	if iq.count == configInterruptQueueSize {
+		// queue is full; overwrite oldest element (queue head) and increment head
+		iq.queue[iq.head] = mask
+		iq.head++
+		iq.head %= configInterruptQueueSize
+	} else {
+		// queue is not full; place element at queue tail and increment count
+		iq.queue[(iq.head+iq.count)%configInterruptQueueSize] = mask
+		iq.count++
+	}
+}
+
+// deq dequeues the mask in tail position from the receiver iq's queue, reducing
+// queue length by 1, and returns the dequeued value with true.
+//
+// When the queue is empty, queue length remains unaffected, and it returns 0
+// with false.
+func (iq *deviceControllerInterruptQueue) deq() (uintptr, bool) {
+	if iq.count == 0 {
+		// queue is empty; reset head and return an invalid value
+		iq.head = 0
+		return 0, false
+	}
+	// queue is not empty; decrement count, reset and return value at queue tail
+	iq.count--
+	n := (iq.head + iq.count) % configInterruptQueueSize
+	m := iq.queue[n]
+	iq.queue[n] = 0 // ensure the queue contains no spurious data
+	return m, true
+}
+
+// fill enqueues each given mask (in order) into tail position of the receiver
+// iq's queue, increasing queue length up to capacity, if possible.
+//
+// If the number of values given is greater than available queue positions, each
+// element in head position - at the time the value is enqueued - will be
+// overwritten, so that queue length never exceeds capacity, and the element in
+// tail position is always the final element given.
+func (iq *deviceControllerInterruptQueue) fill(mask ...uintptr) {
+	for _, m := range mask {
+		iq.enq(m)
+	}
+}
+
+// drain dequeues all elements in the receiver iq's queue, reducing queue length
+// to 0, and returns the dequeued values (in order) and the number of number of
+// values dequeued.
+func (iq *deviceControllerInterruptQueue) drain() (
+	q [configInterruptQueueSize]uintptr, n int,
+) {
+	for {
+		m, ok := iq.deq()
+		if !ok {
+			return
+		}
+		q[n] = m
+		n++
+	}
+}
 
 func getQHBuffer(port uint8, qh int, ep int) *deviceControllerQH {
 	if port < configDeviceCount && qh < 2 && ep < 2*configDeviceMaxEndpoints {

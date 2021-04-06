@@ -19,6 +19,8 @@ type deviceControl struct {
 	device *device
 	irq    interrupt.Interrupt
 
+	messages deviceControllerInterruptQueue
+
 	interruptMask uintptr            // interrupt state upon entering critical section
 	criticalState volatile.Register8 // set to 1 if in critical section, else 0
 
@@ -141,25 +143,58 @@ func (dc *deviceControl) enable(enable bool) status {
 // interrupt is the base interrupt handler for all USB device interrupts.
 func (dc *deviceControl) interrupt() {
 
+	// protect access to message queue
+	for statusRetry == dc.critical(true) {
+	}
+
 	// read and clear the interrupts that fired
 	status := dc.bus.USBSTS.Get() & dc.bus.USBINTR.Get()
 	dc.bus.USBSTS.Set(status)
 
-	if 0 != (status & nxp.USB_USBSTS_URI_Msk) { // USB reset
-		dc.reset()
+	// enqueue interrupts for runtime processing
+	dc.messages.enq(uintptr(status))
+
+	// release message queue
+	_ = dc.critical(false)
+}
+
+func (dc *deviceControl) process() status {
+
+	// protect access to message queue
+	if dc.critical(true).OK() {
+
+		// dequeue oldest interrupt in message queue
+		status, ok := dc.messages.deq()
+
+		// release message queue
+		_ = dc.critical(false)
+
+		// process message if queue was not empty
+		if ok {
+
+			if 0 != (status & nxp.USB_USBSTS_URI_Msk) { // USB reset
+				dc.reset()
+			}
+
+			if 0 != (status & nxp.USB_USBSTS_UI_Msk) { // USB token done
+				dc.tokenDone()
+			}
+
+			if 0 != (status & nxp.USB_USBSTS_PCI_Msk) { // USB port status change
+				dc.portChange()
+			}
+
+			if 0 != (status & nxp.USB_USBSTS_SRI_Msk) { // USB start of frame (SOF)
+				dc.frameStart()
+			}
+		}
+
+		// message queue read and processed
+		return statusSuccess
 	}
 
-	if 0 != (status & nxp.USB_USBSTS_UI_Msk) { // USB token done
-		dc.tokenDone()
-	}
-
-	if 0 != (status & nxp.USB_USBSTS_PCI_Msk) { // USB port status change
-		dc.portChange()
-	}
-
-	if 0 != (status & nxp.USB_USBSTS_SRI_Msk) { // USB start of frame (SOF)
-		dc.frameStart()
-	}
+	// could not acquire lock on message queue
+	return statusBusy
 }
 
 func (dc *deviceControl) send(address uint8, buffer []uint8, length uint32) status {

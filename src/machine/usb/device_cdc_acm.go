@@ -70,18 +70,18 @@ type (
 )
 
 const (
-	deviceCDCACMEventSendResponse            deviceClassEventID = iota + 1 // This event indicates the bulk send transfer is complete or cancelled etc.
-	deviceCDCACMEventRecvResponse                                          // This event indicates the bulk receive transfer is complete or cancelled etc..
-	deviceCDCACMEventSerialStateNotify                                     // This event indicates the serial state has been sent to the host.
-	deviceCDCACMEventSendEncapsulatedCommand                               // This event indicates the device received the SEND_ENCAPSULATED_COMMAND request.
-	deviceCDCACMEventGetEncapsulatedResponse                               // This event indicates the device received the GET_ENCAPSULATED_RESPONSE request.
-	deviceCDCACMEventSetCommFeature                                        // This event indicates the device received the SET_COMM_FEATURE request.
-	deviceCDCACMEventGetCommFeature                                        // This event indicates the device received the GET_COMM_FEATURE request.
-	deviceCDCACMEventClearCommFeature                                      // This event indicates the device received the CLEAR_COMM_FEATURE request.
-	deviceCDCACMEventGetLineCoding                                         // This event indicates the device received the GET_LINE_CODING request.
-	deviceCDCACMEventSetLineCoding                                         // This event indicates the device received the SET_LINE_CODING request.
-	deviceCDCACMEventSetControlLineState                                   // This event indicates the device received the SET_CONTRL_LINE_STATE request.
-	deviceCDCACMEventSendBreak                                             // This event indicates the device received the SEND_BREAK request.
+	deviceCDCACMEventSendResponse            deviceEventID = iota + 1 // This event indicates the bulk send transfer is complete or cancelled etc.
+	deviceCDCACMEventRecvResponse                                     // This event indicates the bulk receive transfer is complete or cancelled etc..
+	deviceCDCACMEventSerialStateNotify                                // This event indicates the serial state has been sent to the host.
+	deviceCDCACMEventSendEncapsulatedCommand                          // This event indicates the device received the SEND_ENCAPSULATED_COMMAND request.
+	deviceCDCACMEventGetEncapsulatedResponse                          // This event indicates the device received the GET_ENCAPSULATED_RESPONSE request.
+	deviceCDCACMEventSetCommFeature                                   // This event indicates the device received the SET_COMM_FEATURE request.
+	deviceCDCACMEventGetCommFeature                                   // This event indicates the device received the GET_COMM_FEATURE request.
+	deviceCDCACMEventClearCommFeature                                 // This event indicates the device received the CLEAR_COMM_FEATURE request.
+	deviceCDCACMEventGetLineCoding                                    // This event indicates the device received the GET_LINE_CODING request.
+	deviceCDCACMEventSetLineCoding                                    // This event indicates the device received the SET_LINE_CODING request.
+	deviceCDCACMEventSetControlLineState                              // This event indicates the device received the SET_CONTRL_LINE_STATE request.
+	deviceCDCACMEventSendBreak                                        // This event indicates the device received the SEND_BREAK request.
 )
 
 var (
@@ -119,7 +119,7 @@ var (
 		}},
 	}
 
-	deviceCDCACMBufferInvalid32 = u32LE(0xFFFFFFFF)
+	deviceCDCACMBufferInvalid32 = leU32(0xFFFFFFFF)
 )
 
 func (acm *deviceCDCACM) init(device *device, config *deviceClassConfig) status {
@@ -243,7 +243,7 @@ func (acm *deviceCDCACM) deinitEndpoints() status {
 	return statusSuccess
 }
 
-func (acm *deviceCDCACM) event(event deviceClassEventID, param interface{}) (s status) {
+func (acm *deviceCDCACM) event(event deviceEventID, param interface{}) (s status) {
 
 	// assume success unless error condition deliberately detected
 	s = statusSuccess
@@ -311,8 +311,8 @@ func (acm *deviceCDCACM) event(event deviceClassEventID, param interface{}) (s s
 					if address == e.address {
 						// found endpoint, set stall flag
 						acm.interruptIn.pipeStall = true
-						// notify device controller
-						c := acm.device.controller.control(deviceControlEndpointStall, address)
+						// notify device
+						c := acm.device.control(deviceControlEndpointStall, address)
 						if s.OK() && !c.OK() {
 							s = c
 						}
@@ -328,8 +328,8 @@ func (acm *deviceCDCACM) event(event deviceClassEventID, param interface{}) (s s
 						} else {
 							acm.bulkOut.pipeStall = true
 						}
-						// notify device controller
-						c := acm.device.controller.control(deviceControlEndpointStall, address)
+						// notify device
+						c := acm.device.control(deviceControlEndpointStall, address)
 						if s.OK() && !c.OK() {
 							s = c
 						}
@@ -350,8 +350,8 @@ func (acm *deviceCDCACM) event(event deviceClassEventID, param interface{}) (s s
 				// check if given endpoint is a communication/control endpoint
 				for _, e := range acm.comm.endpoint {
 					if address == e.address {
-						// found endpoint, notify device controller
-						c := acm.device.controller.control(deviceControlEndpointUnstall, address)
+						// found endpoint, notify device
+						c := acm.device.control(deviceControlEndpointUnstall, address)
 						if s.OK() && !c.OK() {
 							s = c
 						}
@@ -364,7 +364,7 @@ func (acm *deviceCDCACM) event(event deviceClassEventID, param interface{}) (s s
 								// verify the buffer has valid data
 								if !bytes.Equal(acm.interruptIn.pipeDataBuffer, deviceCDCACMBufferInvalid32) {
 									// transmit
-									u := acm.device.controller.send(
+									u := acm.device.send(
 										acm.interruptIn.ep,
 										acm.interruptIn.pipeDataBuffer,
 										acm.interruptIn.pipeDataLen)
@@ -393,8 +393,8 @@ func (acm *deviceCDCACM) event(event deviceClassEventID, param interface{}) (s s
 				// check if given endpoint is a data endpoint
 				for _, e := range acm.data.endpoint {
 					if address == e.address {
-						// found endpoint, notify device controller
-						c := acm.device.controller.control(deviceControlEndpointUnstall, address)
+						// found endpoint, notify device
+						c := acm.device.control(deviceControlEndpointUnstall, address)
 						if s.OK() && !c.OK() {
 							s = c
 						}
@@ -408,7 +408,7 @@ func (acm *deviceCDCACM) event(event deviceClassEventID, param interface{}) (s s
 								// verify the buffer has valid data
 								if !bytes.Equal(acm.bulkIn.pipeDataBuffer, deviceCDCACMBufferInvalid32) {
 									// transmit
-									u := acm.device.controller.send(
+									u := acm.device.send(
 										acm.bulkIn.ep,
 										acm.bulkIn.pipeDataBuffer,
 										acm.bulkIn.pipeDataLen)
@@ -439,7 +439,7 @@ func (acm *deviceCDCACM) event(event deviceClassEventID, param interface{}) (s s
 								// verify the buffer has valid data
 								if !bytes.Equal(acm.bulkOut.pipeDataBuffer, deviceCDCACMBufferInvalid32) {
 									// receive
-									u := acm.device.controller.receive(
+									u := acm.device.receive(
 										acm.bulkOut.ep,
 										acm.bulkOut.pipeDataBuffer,
 										acm.bulkOut.pipeDataLen)
@@ -474,7 +474,7 @@ func (acm *deviceCDCACM) event(event deviceClassEventID, param interface{}) (s s
 		}
 	case deviceClassEventClassRequest:
 		// verify parameter and fields
-		if request, ok := param.(deviceControlRequest); ok {
+		if request, ok := param.(*deviceControlRequest); ok {
 			// verify requested interface is receiver's interface and request is CDC
 			if (request.setup.wIndex&0xFF) != uint16(acm.interfaceNumber) ||
 				(request.setup.bmRequestType&specRequestTypeTypeMsk) != specRequestTypeTypeClass {
@@ -487,7 +487,7 @@ func (acm *deviceCDCACM) event(event deviceClassEventID, param interface{}) (s s
 					isSetup:        request.isSetup,
 				}
 				// translate request code to event code
-				var event deviceClassEventID
+				var event deviceEventID
 				switch request.setup.bRequest {
 				case deviceCDCRequestSendEncapsulatedCommand:
 					event = deviceCDCACMEventSendEncapsulatedCommand
@@ -511,7 +511,7 @@ func (acm *deviceCDCACM) event(event deviceClassEventID, param interface{}) (s s
 					s = statusInvalidRequest
 				}
 				// notify request to upper layer driver
-				s = acm.config.driver.event(event, param)
+				acm.device.event(event, param)
 			} else {
 				s = statusInvalidRequest
 			}
@@ -546,8 +546,8 @@ func (acm *deviceCDCACM) send(ep uint8, buffer []uint8, length uint32) status {
 		pipe.pipeDataLen = length
 		return statusSuccess
 	}
-	// pass data to device controller for transmission
-	if s := acm.device.controller.send(ep, buffer, length); !s.OK() {
+	// pass data to device for transmission
+	if s := acm.device.send(ep, buffer, length); !s.OK() {
 		pipe.isBusy = false
 		return s
 	}
@@ -575,8 +575,8 @@ func (acm *deviceCDCACM) receive(ep uint8, buffer []uint8, length uint32) status
 		pipe.pipeDataLen = length
 		return statusSuccess
 	}
-	// pass data to device controller for reception
-	if s := acm.device.controller.receive(ep, buffer, length); !s.OK() {
+	// pass data to device for reception
+	if s := acm.device.receive(ep, buffer, length); !s.OK() {
 		pipe.isBusy = false
 		return s
 	}
@@ -627,8 +627,8 @@ func (acm *deviceCDCACM) endpointInterface(direction, transferType uint8) (
 func (acm *deviceCDCACM) interruptInEvent(message deviceEndpointCallbackMessage, param interface{}) status {
 	if a, ok := param.(*deviceCDCACM); ok {
 		a.interruptIn.isBusy = false
-		if nil != a.config && nil != a.config.driver {
-			a.config.driver.event(deviceCDCACMEventSerialStateNotify, message)
+		if nil != a.device && nil != a.device.class {
+			a.device.event(deviceCDCACMEventSerialStateNotify, message)
 			return statusSuccess
 		}
 	}
@@ -638,8 +638,8 @@ func (acm *deviceCDCACM) interruptInEvent(message deviceEndpointCallbackMessage,
 func (acm *deviceCDCACM) bulkInEvent(message deviceEndpointCallbackMessage, param interface{}) status {
 	if a, ok := param.(*deviceCDCACM); ok {
 		a.bulkIn.isBusy = false
-		if nil != a.config && nil != a.config.driver {
-			a.config.driver.event(deviceCDCACMEventSendResponse, message)
+		if nil != a.device && nil != a.device.class {
+			a.device.event(deviceCDCACMEventSendResponse, message)
 			return statusSuccess
 		}
 	}
@@ -649,8 +649,8 @@ func (acm *deviceCDCACM) bulkInEvent(message deviceEndpointCallbackMessage, para
 func (acm *deviceCDCACM) bulkOutEvent(message deviceEndpointCallbackMessage, param interface{}) status {
 	if a, ok := param.(*deviceCDCACM); ok {
 		a.bulkOut.isBusy = false
-		if nil != a.config && nil != a.config.driver {
-			a.config.driver.event(deviceCDCACMEventRecvResponse, message)
+		if nil != a.device && nil != a.device.class {
+			a.device.event(deviceCDCACMEventRecvResponse, message)
 			return statusSuccess
 		}
 	}

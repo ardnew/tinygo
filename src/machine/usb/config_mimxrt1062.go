@@ -31,6 +31,10 @@ const (
 	// configInterruptPriority defines the priority number for USB interrupts.
 	configInterruptPriority = 3
 
+	// configInterruptQueueSize defines the number of interrupts to retain in the
+	// queue of runtime processes.
+	configInterruptQueueSize = 8
+
 	// configDeviceMaxEndpoints defines the maximum number of endpoints supported.
 	configDeviceMaxEndpoints = 4
 

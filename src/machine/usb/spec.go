@@ -162,18 +162,3 @@ func unpackEndpoint(address uint8) (number, direction uint8) {
 		(address & specDescriptorEndpointAddressDirectionMsk) >>
 			specDescriptorEndpointAddressDirectionPos
 }
-
-// u32LE returns a slice containing the 4 bytes from the given uint32 value.
-//
-// The returned bytes have little-endian ordering; that is, the first element
-// at index 0 is the least-significant byte in value, index 1 is the second-to-
-// least-significant byte, and so on.
-//go:inline
-func u32LE(value uint32) []uint8 {
-	return []uint8{
-		uint8((value & 0x000000FF) >> 0),
-		uint8((value & 0x0000FF00) >> 8),
-		uint8((value & 0x00FF0000) >> 16),
-		uint8((value & 0xFF000000) >> 24),
-	}
-}

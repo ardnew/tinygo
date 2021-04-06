@@ -4,37 +4,29 @@ package usb
 type (
 	// deviceClassDriver defines the class driver interface.
 	deviceClassDriver interface {
-		init(device *device, config *deviceClassConfig) status    // Class driver initialization- entry  of the class driver
-		deinit() status                                           // Class driver de-initialization
-		event(event deviceClassEventID, param interface{}) status // Class driver event callback
-		send(ep uint8, buffer []uint8, length uint32) status      // Class driver send to endpoint
-		receive(ep uint8, buffer []uint8, length uint32) status   // Class driver receive from endpoint
+		init(device *device, config *deviceClassConfig) status  // Class driver initialization- entry  of the class driver
+		deinit() status                                         // Class driver de-initialization
+		event(event deviceEventID, param interface{}) status    // Class driver event callback
+		send(ep uint8, buffer []uint8, length uint32) status    // Class driver send to endpoint
+		receive(ep uint8, buffer []uint8, length uint32) status // Class driver receive from endpoint
+	}
+
+	deviceClassEventHandler interface {
+		event(ev deviceEventID, param interface{}) status
 	}
 
 	deviceEventFunc            func(ev deviceEventID, param interface{}) status
 	deviceEndpointCallbackFunc func(message deviceEndpointCallbackMessage, param interface{}) status
+	deviceRequestCallbackFunc  func(setup *deviceSetup, buffer *[]uint8, length *uint32) status
 
-	deviceNotificationID   uint8
-	deviceControlID        uint8
-	deviceStatusID         uint8
-	deviceStateID          uint8
-	deviceEndpointStatusID uint8
-	deviceEventID          uint8
-	deviceClassID          uint8
-	deviceClassEventID     uint8
-
-	deviceEndpointCallbackMessage struct {
-		buffer  []uint8 // Transferred buffer
-		length  uint32  // Transferred data length
-		isSetup bool    // Is in a setup phase
-	}
-
-	deviceEndpointCallbackList [2 * configDeviceMaxEndpoints]deviceEndpointCallback
-	deviceEndpointCallback     struct {
-		callback deviceEndpointCallbackFunc
-		param    interface{} // Parameter for callback function
-		isBusy   bool
-	}
+	deviceNotificationID    uint8
+	deviceControlID         uint8
+	deviceStatusID          uint8
+	deviceStateID           uint8
+	deviceEndpointStatusID  uint8
+	deviceEventID           uint8
+	deviceClassID           uint8
+	deviceControlRWSequence uint8
 
 	deviceEndpointConfig struct {
 		maxPacketSize uint16 // Endpoint maximum packet size
@@ -47,22 +39,6 @@ type (
 	deviceEndpointStatus struct {
 		address uint8  // Endpoint address
 		status  uint16 // Endpoint status (idle or stalled)
-	}
-
-	// deviceEndpoint contains the information for a USB device endpoint.
-	deviceEndpoint struct {
-		address       uint8  // Endpoint address
-		transferType  uint8  // Endpoint transfer type
-		maxPacketSize uint16 // Endpoint maximum packet size
-		interval      uint8  // Endpoint interval
-	}
-
-	// deviceInterface contains the endpoints and class-specific information for
-	// a USB device interface.
-	deviceInterface struct {
-		alternateSetting uint8            // Alternate setting number
-		endpoint         []deviceEndpoint // Endpoints of the interface
-		classSpecific    interface{}      // Class specific structure handle
 	}
 
 	deviceNotification struct {
@@ -81,15 +57,33 @@ type (
 		wLength       uint16
 	}
 
-	device struct {
-		port             uint8                      // USB port (core index)
-		controller       deviceController           // Controller interface
-		class            *deviceClass               // USB device class
-		endpointCallback deviceEndpointCallbackList // Endpoint callback function structure
-		deviceAddress    uint8                      // Current device address
-		state            deviceStateID              // Current device state
-		isResetting      bool                       // Is doing device reset or not
-		hwTick           int64                      // (volatile) Current hw tick (ms)
+	deviceEndpointCallbackMessage struct {
+		buffer  []uint8 // Transferred buffer
+		length  uint32  // Transferred data length
+		isSetup bool    // Is in a setup phase
+	}
+
+	deviceEndpointCallbackList [2 * configDeviceMaxEndpoints]deviceEndpointCallback
+	deviceEndpointCallback     struct {
+		callback deviceEndpointCallbackFunc
+		param    interface{} // Parameter for callback function
+		isBusy   bool
+	}
+
+	// deviceEndpoint contains the information for a USB device endpoint.
+	deviceEndpoint struct {
+		address       uint8  // Endpoint address
+		transferType  uint8  // Endpoint transfer type
+		maxPacketSize uint16 // Endpoint maximum packet size
+		interval      uint8  // Endpoint interval
+	}
+
+	// deviceInterface contains the endpoints and class-specific information for
+	// a USB device interface.
+	deviceInterface struct {
+		alternateSetting uint8            // Alternate setting number
+		endpoint         []deviceEndpoint // Endpoints of the interface
+		classSpecific    interface{}      // Class specific structure handle
 	}
 
 	// deviceClassInterface contains the USB device class details, including
@@ -117,11 +111,23 @@ type (
 
 	// deviceClass contains common device class state information.
 	deviceClass struct {
-		device            *device             // USB device handle
-		config            []deviceClassConfig // USB device class configuration list
-		event             deviceEventFunc     // application callback
-		setupBuffer       []uint8             // Setup packet data buffer
-		transcationBuffer uint16              // Get status/configuration, get/set interface, get sync frame
+		device            *device                 // USB device handle
+		config            []deviceClassConfig     // USB device class configuration list
+		handler           deviceClassEventHandler // application callback
+		setupBuffer       []uint8                 // Setup packet data buffer
+		transcationBuffer uint16                  // Get status/configuration, get/set interface, get sync frame
+	}
+
+	device struct {
+		port             uint8                       // USB port (core index)
+		controller       deviceController            // Controller interface
+		class            *deviceClass                // USB device class
+		standardRequest  []deviceRequestCallbackFunc // Standard request callbacks
+		endpointCallback deviceEndpointCallbackList  // Endpoint callback function structure
+		deviceAddress    uint8                       // Current device address
+		state            deviceStateID               // Current device state
+		isResetting      bool                        // Is doing device reset or not
+		hwTick           int64                       // (volatile) Current hw tick (ms)
 	}
 
 	// // 			This structure is used to pass the control request information.
@@ -338,7 +344,7 @@ const (
 )
 
 const (
-	deviceClassEventInvalid deviceClassEventID = iota
+	deviceClassEventInvalid deviceEventID = iota
 	deviceClassEventClassRequest
 	deviceClassEventDeviceReset
 	deviceClassEventSetConfiguration
@@ -347,8 +353,34 @@ const (
 	deviceClassEventClearEndpointHalt
 )
 
+const (
+	deviceControlPipeSetupStage  deviceControlRWSequence = iota // Setup stage
+	deviceControlPipeDataStage                                  // Data stage
+	deviceControlPipeStatusStage                                // status stage
+)
+
+// Sizes of various device structures and buffers.
+const (
+	deviceSetupSize = 8 // deviceSetup struct (bytes)
+)
+
 var (
 	deviceClassInstance [configDeviceCount]deviceClass
+
+	deviceEndpointControlInConfig = deviceEndpointConfig{
+		maxPacketSize: configDeviceControllerMaxPacketSize,
+		address:       uint8(specEndpointControl | specDescriptorEndpointAddressDirectionIn),
+		transferType:  specEndpointControl,
+		zlt:           1,
+		interval:      0,
+	}
+	deviceEndpointControlOutConfig = deviceEndpointConfig{
+		maxPacketSize: configDeviceControllerMaxPacketSize,
+		address:       uint8(specEndpointControl | specDescriptorEndpointAddressDirectionOut),
+		transferType:  specEndpointControl,
+		zlt:           1,
+		interval:      0,
+	}
 )
 
 func (d *device) init(port uint8) (s status) {
@@ -365,6 +397,21 @@ func (d *device) init(port uint8) (s status) {
 		d.endpointCallback[i].param = nil
 		d.endpointCallback[i].isBusy = false
 	}
+	d.standardRequest = []deviceRequestCallbackFunc{
+		d.requestGetStatus,
+		d.requestSetClearFeature,
+		nil,
+		d.requestSetClearFeature,
+		nil,
+		d.requestSetAddress,
+		d.requestGetDescriptor,
+		nil,
+		d.requestGetConfiguration,
+		d.requestSetConfiguration,
+		d.requestGetInterface,
+		d.requestSetInterface,
+		d.requestSynchFrame,
+	}
 
 	// initialize platform via device controller interface
 	return d.controller.init()
@@ -378,7 +425,7 @@ func (d *device) deinit() status {
 	return s
 }
 
-func (d *device) initClass(config []deviceClassConfig, event deviceEventFunc) *deviceClass {
+func (d *device) initClass(config []deviceClassConfig, handler deviceClassEventHandler) *deviceClass {
 
 	// verify a device configuration was provided
 	if nil == d || nil == config || len(config) == 0 {
@@ -390,7 +437,7 @@ func (d *device) initClass(config []deviceClassConfig, event deviceEventFunc) *d
 	// initialize device class
 	c.device = d
 	c.config = config
-	c.event = event
+	c.handler = handler
 	c.setupBuffer = nil // TODO
 	c.transcationBuffer = 0
 
@@ -410,20 +457,37 @@ func (d *device) initClass(config []deviceClassConfig, event deviceEventFunc) *d
 	return c
 }
 
+func (d *device) transfer(address uint8, buffer []uint8, length uint32) status {
+	// TODO
+	return statusSuccess
+}
+
+func (d *device) send(address uint8, buffer []uint8, length uint32) status {
+	return d.transfer(address, buffer, length)
+}
+
+func (d *device) receive(address uint8, buffer []uint8, length uint32) status {
+	return d.transfer(address, buffer, length)
+}
+
+func (d *device) cancel(address uint8) status {
+	if nil == d.controller {
+		return statusInvalidController
+	}
+	return d.controller.cancel(address)
+}
+
+func (d *device) control(command deviceControlID, param interface{}) status {
+	if nil == d.controller {
+		return statusInvalidController
+	}
+	return d.controller.control(command, param)
+}
+
 func (d *device) initControlPipes() status {
 
-	addrIn, addrOut :=
-		uint8(specEndpointControl|specDescriptorEndpointAddressDirectionIn),
-		uint8(specEndpointControl|specDescriptorEndpointAddressDirectionOut)
-
 	if s := d.initEndpoint(
-		deviceEndpointConfig{
-			maxPacketSize: configDeviceControllerMaxPacketSize,
-			address:       addrIn,
-			transferType:  specEndpointControl,
-			zlt:           1,
-			interval:      0,
-		},
+		deviceEndpointControlInConfig,
 		deviceEndpointCallback{
 			callback: d.controlEndpoint,
 			param:    d.class,
@@ -433,19 +497,13 @@ func (d *device) initControlPipes() status {
 	}
 
 	if s := d.initEndpoint(
-		deviceEndpointConfig{
-			maxPacketSize: configDeviceControllerMaxPacketSize,
-			address:       addrOut,
-			transferType:  specEndpointControl,
-			zlt:           1,
-			interval:      0,
-		},
+		deviceEndpointControlOutConfig,
 		deviceEndpointCallback{
 			callback: d.controlEndpoint,
 			param:    d.class,
 		},
 	); !s.OK() {
-		_ = d.deinitEndpoint(addrIn)
+		_ = d.deinitEndpoint(deviceEndpointControlInConfig.address)
 		return s
 	}
 
@@ -464,12 +522,12 @@ func (d *device) initEndpoint(config deviceEndpointConfig, callback deviceEndpoi
 	d.endpointCallback[(endpoint<<1)|direction].param = callback.param
 	d.endpointCallback[(endpoint<<1)|direction].isBusy = false
 
-	return d.controller.control(deviceControlEndpointInit, config)
+	return d.control(deviceControlEndpointInit, config)
 }
 
 func (d *device) deinitEndpoint(address uint8) status {
 
-	s := d.controller.control(deviceControlEndpointDeinit, address)
+	s := d.control(deviceControlEndpointDeinit, address)
 
 	endpoint, direction := unpackEndpoint(address)
 
@@ -484,7 +542,208 @@ func (d *device) deinitEndpoint(address uint8) status {
 	return s
 }
 
+func (d *device) feedback(setup *deviceSetup, status status, stage deviceControlRWSequence,
+	buffer *[]uint8, length *uint32) status {
+	direction := uint8(specIn)
+	if !status.OK() {
+		if (setup.bmRequestType&specRequestTypeTypeMsk) == specRequestTypeTypeStandard &&
+			(setup.bmRequestType&specRequestTypeDirMsk) == specRequestTypeDirOut &&
+			0 != setup.wLength && deviceControlPipeSetupStage == stage {
+			direction = specOut
+		}
+		return d.control(deviceControlEndpointStall,
+			specEndpointControl|(direction<<specDescriptorEndpointAddressDirectionPos))
+	} else {
+		if *length > uint32(setup.wLength) {
+			*length = uint32(setup.wLength)
+		}
+		s := d.send(specEndpointControl, *buffer, *length)
+		if s.OK() && (setup.bmRequestType&specRequestTypeDirMsk) == specRequestTypeDirIn {
+			s = d.receive(specEndpointControl, nil, 0)
+		}
+		return s
+	}
+}
+
 func (d *device) controlEndpoint(message deviceEndpointCallbackMessage, param interface{}) status {
+
+	// verify request and parameters
+	if message.length == 0xFFFFFFFF || nil == param {
+		return statusInvalidRequest
+	}
+	class, ok := param.(*deviceClass)
+	if !ok {
+		return statusInvalidParameter
+	}
+	// read current setup buffer from given deviceClass in param
+	var setup deviceSetup
+	setupStatus := setup.parse(class.setupBuffer)
+	if !setupStatus.OK() {
+		return setupStatus
+	}
+
+	// read current device state of receiver
+	var state deviceStateID
+	s := d.status(deviceStatusDeviceState, &state)
+	if !s.OK() {
+		return statusInvalidHandle
+	}
+
+	// allocate buffer for request responses
+	buffer := []uint8{}
+	length := uint32(0)
+
+	if message.isSetup {
+		// verify message received contains expected setup data
+		if nil == message.buffer || deviceSetupSize != message.length {
+			return statusInvalidRequest
+		}
+		// read setup data from given message buffer
+		s = setup.parse(message.buffer)
+		if !s.OK() {
+			return statusInvalidRequest
+		}
+		// process message as a received setup request
+		if (setup.bmRequestType & specRequestTypeTypeMsk) == specRequestTypeTypeStandard {
+			// handle standard request
+			if int(setup.bRequest) < len(d.standardRequest) {
+				if req := d.standardRequest[setup.bRequest]; nil != req {
+					// invoke callback
+					_ = req(&setup, &buffer, &length)
+				}
+			}
+		} else {
+			if 0 != setup.wLength &&
+				(setup.bmRequestType&specRequestTypeDirMsk) == specRequestTypeDirOut {
+				if (setup.bmRequestType & specRequestTypeTypeClass) == specRequestTypeTypeClass {
+					req := deviceControlRequest{
+						setup:   setup,
+						buffer:  nil,
+						length:  uint32(setup.wLength),
+						isSetup: true,
+					}
+					for i := range d.class.config {
+						_ = d.class.config[i].driver.event(deviceClassEventClassRequest, &req)
+					}
+					buffer = req.buffer
+					length = req.length
+				} else if (setup.bmRequestType & specRequestTypeTypeVendor) == specRequestTypeTypeVendor {
+					req := deviceControlRequest{
+						setup:   setup,
+						buffer:  nil,
+						length:  uint32(setup.wLength),
+						isSetup: true,
+					}
+					d.event(deviceEventVendorRequest, &req)
+					buffer = req.buffer
+					length = req.length
+				}
+				if s.OK() {
+					return d.receive(specEndpointControl, buffer, uint32(setup.wLength))
+				}
+			} else {
+				if (setup.bmRequestType & specRequestTypeTypeClass) == specRequestTypeTypeClass {
+					req := deviceControlRequest{
+						setup:   setup,
+						buffer:  nil,
+						length:  uint32(setup.wLength),
+						isSetup: true,
+					}
+					for i := range d.class.config {
+						_ = d.class.config[i].driver.event(deviceClassEventClassRequest, &req)
+					}
+					buffer = req.buffer
+					length = req.length
+				} else if (setup.bmRequestType & specRequestTypeTypeVendor) == specRequestTypeTypeVendor {
+					req := deviceControlRequest{
+						setup:   setup,
+						buffer:  nil,
+						length:  uint32(setup.wLength),
+						isSetup: true,
+					}
+					d.event(deviceEventVendorRequest, &req)
+					buffer = req.buffer
+					length = req.length
+				}
+			}
+		}
+		s = d.feedback(&setup, s, deviceControlPipeSetupStage, &buffer, &length)
+	} else if deviceStateAddressing == state {
+		if int(setup.bRequest) < len(d.standardRequest) {
+			if nil != d.standardRequest[setup.bRequest] {
+				// invoke callback
+				_ = d.standardRequest[setup.bRequest](&setup, &buffer, &length)
+			}
+		}
+	} else if 0 != message.length && 0 != setup.wLength &&
+		(setup.bmRequestType&specRequestTypeDirMsk) == specRequestTypeDirOut {
+		if setup.bmRequestType&specRequestTypeTypeClass == specRequestTypeTypeClass {
+			req := deviceControlRequest{
+				setup:   setup,
+				buffer:  message.buffer,
+				length:  message.length,
+				isSetup: false,
+			}
+			for i := range d.class.config {
+				_ = d.class.config[i].driver.event(deviceClassEventClassRequest, &req)
+			}
+		} else if setup.bmRequestType&specRequestTypeTypeVendor == specRequestTypeTypeVendor {
+			req := deviceControlRequest{
+				setup:   setup,
+				buffer:  message.buffer,
+				length:  message.length,
+				isSetup: false,
+			}
+			d.event(deviceEventVendorRequest, &req)
+		}
+		s = d.feedback(&setup, s, deviceControlPipeDataStage, &buffer, &length)
+	}
+
+	return s
+}
+
+func (d *device) requestGetStatus(
+	setup *deviceSetup, buffer *[]uint8, length *uint32) status {
+	return statusSuccess
+}
+
+func (d *device) requestSetClearFeature(
+	setup *deviceSetup, buffer *[]uint8, length *uint32) status {
+	return statusSuccess
+}
+
+func (d *device) requestSetAddress(
+	setup *deviceSetup, buffer *[]uint8, length *uint32) status {
+	return statusSuccess
+}
+
+func (d *device) requestGetDescriptor(
+	setup *deviceSetup, buffer *[]uint8, length *uint32) status {
+	return statusSuccess
+}
+
+func (d *device) requestGetConfiguration(
+	setup *deviceSetup, buffer *[]uint8, length *uint32) status {
+	return statusSuccess
+}
+
+func (d *device) requestSetConfiguration(
+	setup *deviceSetup, buffer *[]uint8, length *uint32) status {
+	return statusSuccess
+}
+
+func (d *device) requestGetInterface(
+	setup *deviceSetup, buffer *[]uint8, length *uint32) status {
+	return statusSuccess
+}
+
+func (d *device) requestSetInterface(
+	setup *deviceSetup, buffer *[]uint8, length *uint32) status {
+	return statusSuccess
+}
+
+func (d *device) requestSynchFrame(
+	setup *deviceSetup, buffer *[]uint8, length *uint32) status {
 	return statusSuccess
 }
 
@@ -501,8 +760,8 @@ func (d *device) event(ev deviceEventID, param interface{}) {
 		}
 	}
 	// notify the application driver of all events
-	if nil != d.class.event {
-		_ = d.class.event(ev, param)
+	if nil != d.class.handler {
+		_ = d.class.handler.event(ev, param)
 	}
 }
 
@@ -537,6 +796,24 @@ func (d *device) notify(message deviceNotification) {
 	}
 }
 
+func (d *device) notifyReset(message deviceNotification) {
+
+	d.isResetting = true
+	_ = d.control(deviceControlSetDefaultStatus, nil)
+
+	d.state = deviceStateDefault
+	d.deviceAddress = 0
+
+	for count := 0; count < 2*configDeviceMaxEndpoints; count++ {
+		d.endpointCallback[count].callback = nil
+		d.endpointCallback[count].param = nil
+		d.endpointCallback[count].isBusy = false
+	}
+
+	d.event(deviceEventBusReset, nil)
+	d.isResetting = false
+}
+
 func (d *device) status(deviceStatus deviceStatusID, param interface{}) status {
 
 	if nil == param {
@@ -545,10 +822,10 @@ func (d *device) status(deviceStatus deviceStatusID, param interface{}) status {
 
 	switch deviceStatus {
 	case deviceStatusSpeed:
-		return d.controller.control(deviceControlGetSpeed, param)
+		return d.control(deviceControlGetSpeed, param)
 
 	case deviceStatusOTG:
-		return d.controller.control(deviceControlGetOTGStatus, param)
+		return d.control(deviceControlGetOTGStatus, param)
 
 	case deviceStatusDeviceState:
 		if state, ok := param.(*deviceStateID); ok {
@@ -565,13 +842,13 @@ func (d *device) status(deviceStatus deviceStatusID, param interface{}) status {
 		return statusInvalidParameter
 
 	case deviceStatusDevice:
-		return d.controller.control(deviceControlGetDeviceStatus, param)
+		return d.control(deviceControlGetDeviceStatus, param)
 
 	case deviceStatusEndpoint:
-		return d.controller.control(deviceControlGetEndpointStatus, param)
+		return d.control(deviceControlGetEndpointStatus, param)
 
 	case deviceStatusSynchFrame:
-		return d.controller.control(deviceControlGetSynchFrame, param)
+		return d.control(deviceControlGetSynchFrame, param)
 
 	default:
 		return statusInvalidParameter
@@ -582,7 +859,7 @@ func (d *device) setStatus(deviceStatus deviceStatusID, param interface{}) statu
 
 	switch deviceStatus {
 	case deviceStatusOTG:
-		return d.controller.control(deviceControlSetOTGStatus, param)
+		return d.control(deviceControlSetOTGStatus, param)
 
 	case deviceStatusDeviceState:
 		if state, ok := param.(deviceStateID); ok {
@@ -596,47 +873,41 @@ func (d *device) setStatus(deviceStatus deviceStatusID, param interface{}) statu
 			if address, ok := param.(uint8); ok {
 				d.deviceAddress = address
 				d.state = deviceStateAddressing
-				return d.controller.control(deviceControlPreSetDeviceAddress, d.deviceAddress)
+				return d.control(deviceControlPreSetDeviceAddress, d.deviceAddress)
 			}
 			return statusInvalidParameter
 		}
-		return d.controller.control(deviceControlSetDeviceAddress, d.deviceAddress)
+		return d.control(deviceControlSetDeviceAddress, d.deviceAddress)
 
 	case deviceStatusBusResume:
-		return d.controller.control(deviceControlResume, param)
+		return d.control(deviceControlResume, param)
 
 	case deviceStatusBusSleepResume:
-		return d.controller.control(deviceControlSleepResume, param)
+		return d.control(deviceControlSleepResume, param)
 
 	case deviceStatusBusSuspend:
-		return d.controller.control(deviceControlSuspend, param)
+		return d.control(deviceControlSuspend, param)
 
 	case deviceStatusBusSleep:
-		return d.controller.control(deviceControlSleep, param)
+		return d.control(deviceControlSleep, param)
 
 	default:
 		return statusInvalidParameter
 	}
 }
 
-func (d *device) notifyReset(message deviceNotification) {
-
-	d.isResetting = true
-	_ = d.controller.control(deviceControlSetDefaultStatus, nil)
-
-	d.state = deviceStateDefault
-	d.deviceAddress = 0
-
-	for count := 0; count < 2*configDeviceMaxEndpoints; count++ {
-		d.endpointCallback[count].callback = nil
-		d.endpointCallback[count].param = nil
-		d.endpointCallback[count].isBusy = false
-	}
-
-	d.event(deviceEventBusReset, nil)
-	d.isResetting = false
-}
-
 func (d *device) busSpeed(speed *uint8) status {
 	return d.status(deviceStatusSpeed, speed)
+}
+
+func (s *deviceSetup) parse(buffer []uint8) status {
+	if nil == buffer || len(buffer) < deviceSetupSize {
+		return statusInvalidParameter
+	}
+	s.bmRequestType = buffer[0]
+	s.bRequest = buffer[1]
+	s.wValue = (uint16(buffer[3]) << 8) | uint16(buffer[2])
+	s.wIndex = (uint16(buffer[5]) << 8) | uint16(buffer[4])
+	s.wLength = (uint16(buffer[7]) << 8) | uint16(buffer[6])
+	return statusSuccess
 }
