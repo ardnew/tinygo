@@ -184,8 +184,7 @@ func (acm *deviceCDCACM) initEndpoints() status {
 func (acm *deviceCDCACM) initInterfaceEndpoints(direction, transferType uint8) status {
 
 	// select the relevant fields and callbacks for our given interface type
-	pipe, deviceInterface, endpointCallback :=
-		acm.endpointInterface(direction, transferType)
+	pipe, deviceInterface := acm.endpointInterface(direction, transferType)
 	if nil == deviceInterface {
 		return statusInvalidParameter
 	}
@@ -194,25 +193,19 @@ func (acm *deviceCDCACM) initInterfaceEndpoints(direction, transferType uint8) s
 	for _, ep := range deviceInterface.endpoint {
 		num, dir := unpackEndpoint(ep.address)
 		if dir == direction && ep.transferType == transferType {
-			config := deviceEndpointConfig{
+			pipe.pipeDataBuffer = deviceCDCACMBufferInvalid32
+			pipe.pipeDataLen = 0
+			pipe.pipeStall = false
+			pipe.ep = num
+			pipe.isBusy = false
+
+			if s := acm.device.initEndpoint(&deviceEndpointConfig{
 				maxPacketSize: ep.maxPacketSize,
 				address:       ep.address,
 				transferType:  ep.transferType,
 				zlt:           0,
 				interval:      ep.interval,
-			}
-			callback := deviceEndpointCallback{
-				param:    acm,
-				callback: endpointCallback,
-			}
-			*pipe = deviceCDCACMPipe{
-				pipeDataBuffer: deviceCDCACMBufferInvalid32,
-				pipeDataLen:    0,
-				pipeStall:      false,
-				ep:             num,
-				isBusy:         false,
-			}
-			if s := acm.device.initEndpoint(config, callback); !s.OK() {
+			}, acm, pipe); !s.OK() {
 				return s
 			}
 		}
@@ -370,13 +363,13 @@ func (acm *deviceCDCACM) event(event deviceEventID, param interface{}) (s status
 										acm.interruptIn.pipeDataLen)
 									if !u.OK() {
 										// notify upper layer driver of communication/control event
-										_ = acm.interruptInEvent(
-											deviceEndpointCallbackMessage{
+										_ = acm.controlEndpoint(
+											deviceEndpointControlMessage{
 												buffer:  acm.interruptIn.pipeDataBuffer,
 												length:  acm.interruptIn.pipeDataLen,
 												isSetup: false,
 											},
-											acm,
+											&acm.interruptIn,
 										)
 										if s.OK() {
 											s = u
@@ -414,13 +407,13 @@ func (acm *deviceCDCACM) event(event deviceEventID, param interface{}) (s status
 										acm.bulkIn.pipeDataLen)
 									if !u.OK() {
 										// notify upper layer driver of data input event
-										_ = acm.bulkInEvent(
-											deviceEndpointCallbackMessage{
+										_ = acm.controlEndpoint(
+											deviceEndpointControlMessage{
 												buffer:  acm.bulkIn.pipeDataBuffer,
 												length:  acm.bulkIn.pipeDataLen,
 												isSetup: false,
 											},
-											acm,
+											&acm.bulkIn,
 										)
 										if s.OK() {
 											s = u
@@ -445,13 +438,13 @@ func (acm *deviceCDCACM) event(event deviceEventID, param interface{}) (s status
 										acm.bulkOut.pipeDataLen)
 									if !u.OK() {
 										// notify upper layer driver of data output event
-										_ = acm.bulkOutEvent(
-											deviceEndpointCallbackMessage{
+										_ = acm.controlEndpoint(
+											deviceEndpointControlMessage{
 												buffer:  acm.bulkOut.pipeDataBuffer,
 												length:  acm.bulkOut.pipeDataLen,
 												isSetup: false,
 											},
-											acm,
+											&acm.bulkOut,
 										)
 										if s.OK() {
 											s = u
@@ -604,53 +597,38 @@ func (acm *deviceCDCACM) findInterface(classCode uint8) (uint8, *deviceInterface
 	return 0, nil
 }
 
-func (acm *deviceCDCACM) endpointInterface(direction, transferType uint8) (
-	*deviceCDCACMPipe, *deviceInterface, deviceEndpointCallbackFunc,
-) {
+func (acm *deviceCDCACM) endpointInterface(direction, transferType uint8) (*deviceCDCACMPipe, *deviceInterface) {
 	switch transferType {
 	case specEndpointInterrupt:
 		switch direction {
 		case specIn:
-			return &acm.interruptIn, acm.comm, acm.interruptInEvent
+			return &acm.interruptIn, acm.comm
 		}
 	case specEndpointBulk:
 		switch direction {
 		case specIn:
-			return &acm.bulkIn, acm.data, acm.bulkInEvent
+			return &acm.bulkIn, acm.data
 		case specOut:
-			return &acm.bulkOut, acm.data, acm.bulkOutEvent
+			return &acm.bulkOut, acm.data
 		}
 	}
-	return nil, nil, nil
+	return nil, nil
 }
 
-func (acm *deviceCDCACM) interruptInEvent(message deviceEndpointCallbackMessage, param interface{}) status {
-	if a, ok := param.(*deviceCDCACM); ok {
-		a.interruptIn.isBusy = false
-		if nil != a.device && nil != a.device.class {
-			a.device.event(deviceCDCACMEventSerialStateNotify, message)
-			return statusSuccess
+func (acm *deviceCDCACM) controlEndpoint(message deviceEndpointControlMessage, param interface{}) status {
+	if pipe, ok := param.(*deviceCDCACMPipe); ok {
+		var event deviceEventID
+		switch pipe {
+		case &acm.interruptIn:
+			event = deviceCDCACMEventSerialStateNotify
+		case &acm.bulkIn:
+			event = deviceCDCACMEventSendResponse
+		case &acm.bulkOut:
+			event = deviceCDCACMEventRecvResponse
 		}
-	}
-	return statusInvalidParameter
-}
-
-func (acm *deviceCDCACM) bulkInEvent(message deviceEndpointCallbackMessage, param interface{}) status {
-	if a, ok := param.(*deviceCDCACM); ok {
-		a.bulkIn.isBusy = false
-		if nil != a.device && nil != a.device.class {
-			a.device.event(deviceCDCACMEventSendResponse, message)
-			return statusSuccess
-		}
-	}
-	return statusInvalidParameter
-}
-
-func (acm *deviceCDCACM) bulkOutEvent(message deviceEndpointCallbackMessage, param interface{}) status {
-	if a, ok := param.(*deviceCDCACM); ok {
-		a.bulkOut.isBusy = false
-		if nil != a.device && nil != a.device.class {
-			a.device.event(deviceCDCACMEventRecvResponse, message)
+		pipe.isBusy = false
+		if nil != acm.device && nil != acm.device.class {
+			acm.device.event(event, message)
 			return statusSuccess
 		}
 	}

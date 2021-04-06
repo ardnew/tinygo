@@ -15,9 +15,12 @@ type (
 		event(ev deviceEventID, param interface{}) status
 	}
 
-	deviceEventFunc            func(ev deviceEventID, param interface{}) status
-	deviceEndpointCallbackFunc func(message deviceEndpointCallbackMessage, param interface{}) status
-	deviceRequestCallbackFunc  func(setup *deviceSetup, buffer *[]uint8, length *uint32) status
+	deviceEndpointController interface {
+		controlEndpoint(message deviceEndpointControlMessage, param interface{}) status
+	}
+
+	deviceEventFunc           func(ev deviceEventID, param interface{}) status
+	deviceRequestCallbackFunc func(setup *deviceSetup, buffer *[]uint8, length *uint32) status
 
 	deviceNotificationID    uint8
 	deviceControlID         uint8
@@ -57,17 +60,17 @@ type (
 		wLength       uint16
 	}
 
-	deviceEndpointCallbackMessage struct {
+	deviceEndpointControlMessage struct {
 		buffer  []uint8 // Transferred buffer
 		length  uint32  // Transferred data length
 		isSetup bool    // Is in a setup phase
 	}
 
-	deviceEndpointCallbackList [2 * configDeviceMaxEndpoints]deviceEndpointCallback
-	deviceEndpointCallback     struct {
-		callback deviceEndpointCallbackFunc
-		param    interface{} // Parameter for callback function
-		isBusy   bool
+	deviceEndpointControlList [2 * configDeviceMaxEndpoints]deviceEndpointControl
+	deviceEndpointControl     struct {
+		handler deviceEndpointController
+		param   interface{} // Parameter for callback function
+		isBusy  bool
 	}
 
 	// deviceEndpoint contains the information for a USB device endpoint.
@@ -119,15 +122,14 @@ type (
 	}
 
 	device struct {
-		port             uint8                       // USB port (core index)
-		controller       deviceController            // Controller interface
-		class            *deviceClass                // USB device class
-		standardRequest  []deviceRequestCallbackFunc // Standard request callbacks
-		endpointCallback deviceEndpointCallbackList  // Endpoint callback function structure
-		deviceAddress    uint8                       // Current device address
-		state            deviceStateID               // Current device state
-		isResetting      bool                        // Is doing device reset or not
-		hwTick           int64                       // (volatile) Current hw tick (ms)
+		port            uint8                     // USB port (core index)
+		controller      deviceController          // Controller interface
+		class           *deviceClass              // USB device class
+		endpointControl deviceEndpointControlList // Endpoint callback function structure
+		deviceAddress   uint8                     // Current device address
+		state           deviceStateID             // Current device state
+		isResetting     bool                      // Is doing device reset or not
+		hwTick          int64                     // (volatile) Current hw tick (ms)
 	}
 
 	// // 			This structure is used to pass the control request information.
@@ -392,25 +394,10 @@ func (d *device) init(port uint8) (s status) {
 	d.state = deviceStateDefault
 	d.isResetting = false
 	d.hwTick = 0
-	for i := range d.endpointCallback {
-		d.endpointCallback[i].callback = nil
-		d.endpointCallback[i].param = nil
-		d.endpointCallback[i].isBusy = false
-	}
-	d.standardRequest = []deviceRequestCallbackFunc{
-		d.requestGetStatus,
-		d.requestSetClearFeature,
-		nil,
-		d.requestSetClearFeature,
-		nil,
-		d.requestSetAddress,
-		d.requestGetDescriptor,
-		nil,
-		d.requestGetConfiguration,
-		d.requestSetConfiguration,
-		d.requestGetInterface,
-		d.requestSetInterface,
-		d.requestSynchFrame,
+	for i := range d.endpointControl {
+		d.endpointControl[i].handler = nil
+		d.endpointControl[i].param = nil
+		d.endpointControl[i].isBusy = false
 	}
 
 	// initialize platform via device controller interface
@@ -486,23 +473,11 @@ func (d *device) control(command deviceControlID, param interface{}) status {
 
 func (d *device) initControlPipes() status {
 
-	if s := d.initEndpoint(
-		deviceEndpointControlInConfig,
-		deviceEndpointCallback{
-			callback: d.controlEndpoint,
-			param:    d.class,
-		},
-	); !s.OK() {
+	if s := d.initEndpoint(&deviceEndpointControlInConfig, d, d.class); !s.OK() {
 		return s
 	}
 
-	if s := d.initEndpoint(
-		deviceEndpointControlOutConfig,
-		deviceEndpointCallback{
-			callback: d.controlEndpoint,
-			param:    d.class,
-		},
-	); !s.OK() {
+	if s := d.initEndpoint(&deviceEndpointControlOutConfig, d, d.class); !s.OK() {
 		_ = d.deinitEndpoint(deviceEndpointControlInConfig.address)
 		return s
 	}
@@ -510,7 +485,8 @@ func (d *device) initControlPipes() status {
 	return statusSuccess
 }
 
-func (d *device) initEndpoint(config deviceEndpointConfig, callback deviceEndpointCallback) status {
+func (d *device) initEndpoint(config *deviceEndpointConfig,
+	handler deviceEndpointController, param interface{}) status {
 
 	endpoint, direction := unpackEndpoint(config.address)
 
@@ -518,9 +494,9 @@ func (d *device) initEndpoint(config deviceEndpointConfig, callback deviceEndpoi
 		return statusInvalidParameter
 	}
 
-	d.endpointCallback[(endpoint<<1)|direction].callback = callback.callback
-	d.endpointCallback[(endpoint<<1)|direction].param = callback.param
-	d.endpointCallback[(endpoint<<1)|direction].isBusy = false
+	d.endpointControl[(endpoint<<1)|direction].handler = handler
+	d.endpointControl[(endpoint<<1)|direction].param = param
+	d.endpointControl[(endpoint<<1)|direction].isBusy = false
 
 	return d.control(deviceControlEndpointInit, config)
 }
@@ -535,9 +511,9 @@ func (d *device) deinitEndpoint(address uint8) status {
 		return statusInvalidParameter
 	}
 
-	d.endpointCallback[(endpoint<<1)|direction].callback = nil
-	d.endpointCallback[(endpoint<<1)|direction].param = nil
-	d.endpointCallback[(endpoint<<1)|direction].isBusy = false
+	d.endpointControl[(endpoint<<1)|direction].handler = nil
+	d.endpointControl[(endpoint<<1)|direction].param = nil
+	d.endpointControl[(endpoint<<1)|direction].isBusy = false
 
 	return s
 }
@@ -565,7 +541,7 @@ func (d *device) feedback(setup *deviceSetup, status status, stage deviceControl
 	}
 }
 
-func (d *device) controlEndpoint(message deviceEndpointCallbackMessage, param interface{}) status {
+func (d *device) controlEndpoint(message deviceEndpointControlMessage, param interface{}) status {
 
 	// verify request and parameters
 	if message.length == 0xFFFFFFFF || nil == param {
@@ -606,11 +582,8 @@ func (d *device) controlEndpoint(message deviceEndpointCallbackMessage, param in
 		// process message as a received setup request
 		if (setup.bmRequestType & specRequestTypeTypeMsk) == specRequestTypeTypeStandard {
 			// handle standard request
-			if int(setup.bRequest) < len(d.standardRequest) {
-				if req := d.standardRequest[setup.bRequest]; nil != req {
-					// invoke callback
-					_ = req(&setup, &buffer, &length)
-				}
+			if int(setup.bRequest) <= specRequestStandardSynchFrame {
+				_ = d.requestStandard(&setup, &buffer, &length)
 			}
 		} else {
 			if 0 != setup.wLength &&
@@ -669,11 +642,9 @@ func (d *device) controlEndpoint(message deviceEndpointCallbackMessage, param in
 		}
 		s = d.feedback(&setup, s, deviceControlPipeSetupStage, &buffer, &length)
 	} else if deviceStateAddressing == state {
-		if int(setup.bRequest) < len(d.standardRequest) {
-			if nil != d.standardRequest[setup.bRequest] {
-				// invoke callback
-				_ = d.standardRequest[setup.bRequest](&setup, &buffer, &length)
-			}
+		// handle standard request
+		if int(setup.bRequest) <= specRequestStandardSynchFrame {
+			_ = d.requestStandard(&setup, &buffer, &length)
 		}
 	} else if 0 != message.length && 0 != setup.wLength &&
 		(setup.bmRequestType&specRequestTypeDirMsk) == specRequestTypeDirOut {
@@ -700,6 +671,32 @@ func (d *device) controlEndpoint(message deviceEndpointCallbackMessage, param in
 	}
 
 	return s
+}
+
+func (d *device) requestStandard(
+	setup *deviceSetup, buffer *[]uint8, length *uint32) status {
+	switch setup.bRequest {
+	case specRequestStandardGetStatus:
+		return d.requestGetStatus(setup, buffer, length)
+	case specRequestStandardClearFeature, specRequestStandardSetFeature:
+		return d.requestSetClearFeature(setup, buffer, length)
+	case specRequestStandardSetAddress:
+		return d.requestSetAddress(setup, buffer, length)
+	case specRequestStandardGetDescriptor:
+		return d.requestGetDescriptor(setup, buffer, length)
+	case specRequestStandardGetConfiguration:
+		return d.requestGetConfiguration(setup, buffer, length)
+	case specRequestStandardSetConfiguration:
+		return d.requestSetConfiguration(setup, buffer, length)
+	case specRequestStandardGetInterface:
+		return d.requestGetInterface(setup, buffer, length)
+	case specRequestStandardSetInterface:
+		return d.requestSetInterface(setup, buffer, length)
+	case specRequestStandardSynchFrame:
+		return d.requestSynchFrame(setup, buffer, length)
+	default:
+		return statusInvalidRequest
+	}
 }
 
 func (d *device) requestGetStatus(
@@ -775,21 +772,21 @@ func (d *device) notify(message deviceNotification) {
 		endpoint, direction := unpackEndpoint(uint8(message.code))
 
 		if endpoint < configDeviceMaxEndpoints {
-			if nil != d.endpointCallback[(endpoint<<1)|direction].callback {
+			if nil != d.endpointControl[(endpoint<<1)|direction].handler {
 				if message.isSetup {
-					d.endpointCallback[0].isBusy = false
-					d.endpointCallback[1].isBusy = false
+					d.endpointControl[0].isBusy = false
+					d.endpointControl[1].isBusy = false
 				} else {
-					d.endpointCallback[(endpoint<<1)|direction].isBusy = false
+					d.endpointControl[(endpoint<<1)|direction].isBusy = false
 				}
 				// call endpoint callback
-				_ = d.endpointCallback[(endpoint<<1)|direction].callback(
-					deviceEndpointCallbackMessage{
+				_ = d.endpointControl[(endpoint<<1)|direction].handler.controlEndpoint(
+					deviceEndpointControlMessage{
 						buffer:  message.buffer,
 						length:  message.length,
 						isSetup: message.isSetup,
 					},
-					d.endpointCallback[(endpoint<<1)|direction].param,
+					d.endpointControl[(endpoint<<1)|direction].param,
 				)
 			}
 		}
@@ -805,9 +802,9 @@ func (d *device) notifyReset(message deviceNotification) {
 	d.deviceAddress = 0
 
 	for count := 0; count < 2*configDeviceMaxEndpoints; count++ {
-		d.endpointCallback[count].callback = nil
-		d.endpointCallback[count].param = nil
-		d.endpointCallback[count].isBusy = false
+		d.endpointControl[count].handler = nil
+		d.endpointControl[count].param = nil
+		d.endpointControl[count].isBusy = false
 	}
 
 	d.event(deviceEventBusReset, nil)

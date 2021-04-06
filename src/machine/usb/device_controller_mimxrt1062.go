@@ -222,7 +222,7 @@ func (dc *deviceControl) control(command deviceControlID, param interface{}) (s 
 		dc.bus.USBCMD.ClearBits(nxp.USB_USBCMD_RS)
 
 	case deviceControlEndpointInit:
-		config, ok := param.(deviceEndpointConfig)
+		config, ok := param.(*deviceEndpointConfig)
 		if !ok {
 			return statusInvalidParameter
 		}
@@ -404,7 +404,7 @@ func (dc *deviceControl) frameStart() {
 
 }
 
-func (dc *deviceControl) initEndpoint(config deviceEndpointConfig) status {
+func (dc *deviceControl) initEndpoint(config *deviceEndpointConfig) status {
 	return statusSuccess
 }
 
