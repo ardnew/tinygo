@@ -53,6 +53,11 @@ const (
 	// communication with an endpoint. The maximum per USB 2.0 spec is 64 bytes,
 	// although a platform may restrict this to something lower if needed.
 	configDeviceControllerMaxPacketSize = 64
+
+	// configDeviceControllerMaxPrimeAttempts defines the maximum number of
+	// attempts to prime and endpoint for transfer. If attempts exceeds this
+	// value, then the endpoint status has been reset.
+	configDeviceControllerMaxPrimeAttempts = 10000000
 )
 
 // If USB CDC-ACM device support is required, the following array must be

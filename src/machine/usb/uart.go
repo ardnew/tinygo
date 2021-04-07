@@ -72,6 +72,10 @@ func (uart *UART) Configure(config UARTConfig) error {
 	return nil
 }
 
-func (uart *UART) event(ev deviceEventID, param interface{}) status {
+func (uart *UART) deviceEvent(ev deviceEventID, param interface{}) status {
+	return statusSuccess
+}
+
+func (uart *UART) classEvent(ev uint32, param interface{}) status {
 	return statusSuccess
 }

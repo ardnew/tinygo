@@ -70,18 +70,18 @@ type (
 )
 
 const (
-	deviceCDCACMEventSendResponse            deviceEventID = iota + 1 // This event indicates the bulk send transfer is complete or cancelled etc.
-	deviceCDCACMEventRecvResponse                                     // This event indicates the bulk receive transfer is complete or cancelled etc..
-	deviceCDCACMEventSerialStateNotify                                // This event indicates the serial state has been sent to the host.
-	deviceCDCACMEventSendEncapsulatedCommand                          // This event indicates the device received the SEND_ENCAPSULATED_COMMAND request.
-	deviceCDCACMEventGetEncapsulatedResponse                          // This event indicates the device received the GET_ENCAPSULATED_RESPONSE request.
-	deviceCDCACMEventSetCommFeature                                   // This event indicates the device received the SET_COMM_FEATURE request.
-	deviceCDCACMEventGetCommFeature                                   // This event indicates the device received the GET_COMM_FEATURE request.
-	deviceCDCACMEventClearCommFeature                                 // This event indicates the device received the CLEAR_COMM_FEATURE request.
-	deviceCDCACMEventGetLineCoding                                    // This event indicates the device received the GET_LINE_CODING request.
-	deviceCDCACMEventSetLineCoding                                    // This event indicates the device received the SET_LINE_CODING request.
-	deviceCDCACMEventSetControlLineState                              // This event indicates the device received the SET_CONTRL_LINE_STATE request.
-	deviceCDCACMEventSendBreak                                        // This event indicates the device received the SEND_BREAK request.
+	deviceCDCACMEventSendResponse            deviceCDCACMEventID = iota + 1 // This event indicates the bulk send transfer is complete or cancelled etc.
+	deviceCDCACMEventRecvResponse                                           // This event indicates the bulk receive transfer is complete or cancelled etc..
+	deviceCDCACMEventSerialStateNotify                                      // This event indicates the serial state has been sent to the host.
+	deviceCDCACMEventSendEncapsulatedCommand                                // This event indicates the device received the SEND_ENCAPSULATED_COMMAND request.
+	deviceCDCACMEventGetEncapsulatedResponse                                // This event indicates the device received the GET_ENCAPSULATED_RESPONSE request.
+	deviceCDCACMEventSetCommFeature                                         // This event indicates the device received the SET_COMM_FEATURE request.
+	deviceCDCACMEventGetCommFeature                                         // This event indicates the device received the GET_COMM_FEATURE request.
+	deviceCDCACMEventClearCommFeature                                       // This event indicates the device received the CLEAR_COMM_FEATURE request.
+	deviceCDCACMEventGetLineCoding                                          // This event indicates the device received the GET_LINE_CODING request.
+	deviceCDCACMEventSetLineCoding                                          // This event indicates the device received the SET_LINE_CODING request.
+	deviceCDCACMEventSetControlLineState                                    // This event indicates the device received the SET_CONTRL_LINE_STATE request.
+	deviceCDCACMEventSendBreak                                              // This event indicates the device received the SEND_BREAK request.
 )
 
 var (
@@ -236,7 +236,7 @@ func (acm *deviceCDCACM) deinitEndpoints() status {
 	return statusSuccess
 }
 
-func (acm *deviceCDCACM) event(event deviceEventID, param interface{}) (s status) {
+func (acm *deviceCDCACM) event(event deviceClassEventID, param interface{}) (s status) {
 
 	// assume success unless error condition deliberately detected
 	s = statusSuccess
@@ -480,7 +480,7 @@ func (acm *deviceCDCACM) event(event deviceEventID, param interface{}) (s status
 					isSetup:        request.isSetup,
 				}
 				// translate request code to event code
-				var event deviceEventID
+				var event deviceCDCACMEventID
 				switch request.setup.bRequest {
 				case deviceCDCRequestSendEncapsulatedCommand:
 					event = deviceCDCACMEventSendEncapsulatedCommand
@@ -504,7 +504,10 @@ func (acm *deviceCDCACM) event(event deviceEventID, param interface{}) (s status
 					s = statusInvalidRequest
 				}
 				// notify request to upper layer driver
-				acm.device.event(event, param)
+				if nil != acm.device && nil != acm.device.class &&
+					nil != acm.device.class.handler {
+					acm.device.class.handler.classEvent(uint32(event), param)
+				}
 			} else {
 				s = statusInvalidRequest
 			}
@@ -617,7 +620,7 @@ func (acm *deviceCDCACM) endpointInterface(direction, transferType uint8) (*devi
 
 func (acm *deviceCDCACM) controlEndpoint(message deviceEndpointControlMessage, param interface{}) status {
 	if pipe, ok := param.(*deviceCDCACMPipe); ok {
-		var event deviceEventID
+		var event deviceCDCACMEventID
 		switch pipe {
 		case &acm.interruptIn:
 			event = deviceCDCACMEventSerialStateNotify
@@ -627,8 +630,9 @@ func (acm *deviceCDCACM) controlEndpoint(message deviceEndpointControlMessage, p
 			event = deviceCDCACMEventRecvResponse
 		}
 		pipe.isBusy = false
-		if nil != acm.device && nil != acm.device.class {
-			acm.device.event(event, message)
+		if nil != acm.device && nil != acm.device.class &&
+			nil != acm.device.class.handler {
+			acm.device.class.handler.classEvent(uint32(event), message)
 			return statusSuccess
 		}
 	}

@@ -4,15 +4,16 @@ package usb
 type (
 	// deviceClassDriver defines the class driver interface.
 	deviceClassDriver interface {
-		init(device *device, config *deviceClassConfig) status  // Class driver initialization- entry  of the class driver
-		deinit() status                                         // Class driver de-initialization
-		event(event deviceEventID, param interface{}) status    // Class driver event callback
-		send(ep uint8, buffer []uint8, length uint32) status    // Class driver send to endpoint
-		receive(ep uint8, buffer []uint8, length uint32) status // Class driver receive from endpoint
+		init(device *device, config *deviceClassConfig) status    // Class driver initialization- entry  of the class driver
+		deinit() status                                           // Class driver de-initialization
+		event(event deviceClassEventID, param interface{}) status // Class driver event callback
+		send(ep uint8, buffer []uint8, length uint32) status      // Class driver send to endpoint
+		receive(ep uint8, buffer []uint8, length uint32) status   // Class driver receive from endpoint
 	}
 
 	deviceClassEventHandler interface {
-		event(ev deviceEventID, param interface{}) status
+		deviceEvent(ev deviceEventID, param interface{}) status
+		classEvent(ev uint32, param interface{}) status
 	}
 
 	deviceEndpointController interface {
@@ -27,6 +28,7 @@ type (
 	deviceStatusID          uint8
 	deviceStateID           uint8
 	deviceEndpointStatusID  uint8
+	deviceClassEventID      uint8
 	deviceEventID           uint8
 	deviceClassID           uint8
 	deviceControlRWSequence uint8
@@ -346,7 +348,7 @@ const (
 )
 
 const (
-	deviceClassEventInvalid deviceEventID = iota
+	deviceClassEventInvalid deviceClassEventID = iota
 	deviceClassEventClassRequest
 	deviceClassEventDeviceReset
 	deviceClassEventSetConfiguration
@@ -445,16 +447,40 @@ func (d *device) initClass(config []deviceClassConfig, handler deviceClassEventH
 }
 
 func (d *device) transfer(address uint8, buffer []uint8, length uint32) status {
-	// TODO
-	return statusSuccess
+
+	if nil == d.controller {
+		return statusInvalidController
+	}
+
+	endpoint, direction := unpackEndpoint(address)
+	index := (endpoint << 1) | direction
+
+	if d.endpointControl[index].isBusy {
+		return statusBusy
+	}
+	d.endpointControl[index].isBusy = true
+
+	var s status
+	if specDescriptorEndpointAddressDirectionIn ==
+		address&specDescriptorEndpointAddressDirectionMsk {
+		s = d.controller.send(address, buffer, length)
+	} else {
+		s = d.controller.receive(address, buffer, length)
+	}
+	if !s.OK() {
+		d.endpointControl[index].isBusy = false
+	}
+	return s
 }
 
 func (d *device) send(address uint8, buffer []uint8, length uint32) status {
-	return d.transfer(address, buffer, length)
+	return d.transfer((address&specDescriptorEndpointAddressNumberMsk)|
+		(specIn<<specDescriptorEndpointAddressDirectionPos), buffer, length)
 }
 
 func (d *device) receive(address uint8, buffer []uint8, length uint32) status {
-	return d.transfer(address, buffer, length)
+	return d.transfer((address&specDescriptorEndpointAddressNumberMsk)|
+		(specOut<<specDescriptorEndpointAddressDirectionPos), buffer, length)
 }
 
 func (d *device) cancel(address uint8) status {
@@ -758,7 +784,7 @@ func (d *device) event(ev deviceEventID, param interface{}) {
 	}
 	// notify the application driver of all events
 	if nil != d.class.handler {
-		_ = d.class.handler.event(ev, param)
+		_ = d.class.handler.deviceEvent(ev, param)
 	}
 }
 

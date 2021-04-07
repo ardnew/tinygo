@@ -197,12 +197,172 @@ func (dc *deviceControl) process() status {
 	return statusBusy
 }
 
-func (dc *deviceControl) send(address uint8, buffer []uint8, length uint32) status {
+func (dc *deviceControl) transfer(address uint8, buffer []uint8, length uint32) status {
+
+	if dc.isResetting {
+		return statusError
+	}
+
+	endpoint, direction := unpackEndpoint(address)
+	endpointIndex := int((endpoint << 1) | direction)
+
+	primeBit := uint32(1) << ((address & specDescriptorEndpointAddressNumberMsk) +
+		((address & specDescriptorEndpointAddressDirectionMsk) >> 3))
+
+	epStatus := primeBit
+	currentIndex := 0
+	qhIdle := false
+
+	qh := getQHBuffer(dc.port, 0, endpointIndex)
+	if 0 == qh.endpointStatus&0x1 { // bit 0: isOpened
+		return statusError
+	}
+
+	dtdRequestCount := (length + deviceControllerDTDTotalBytes - 1) /
+		deviceControllerDTDTotalBytes
+	if 0 == dtdRequestCount {
+		dtdRequestCount = 1
+	}
+
+	if dtdRequestCount > uint32(dc.dtdCount) {
+		return statusBusy
+	}
+
+	var dtdHead *deviceControllerDTD
+	var sendLength uint32
+
+	for {
+
+		// limit transfer length to total DTD bytes
+		sendLength = length
+		if length > deviceControllerDTDTotalBytes {
+			sendLength = deviceControllerDTDTotalBytes
+		}
+		length -= sendLength
+
+		// select a free DTD
+		dtd := dc.dtdFree
+		dc.dtdFree = dtd.nextDTDPointer
+		dc.dtdCount--
+
+		// save DTD head when current active buffer offset is 0
+		if 0 == currentIndex {
+			dtdHead = dtd
+		}
+
+		// set DTD field
+		dtd.nextDTDPointer = deviceControllerDTDTerminate
+		dtd.bufferPointerPage[0] =
+			uint32(uintptr(unsafe.Pointer(&buffer[0]))) + uint32(currentIndex)
+		dtd.bufferPointerPage[1] =
+			(dtd.bufferPointerPage[0] + deviceControllerDTDPageBlock) & deviceControllerDTDPageMsk
+		dtd.bufferPointerPage[2] =
+			dtd.bufferPointerPage[1] + deviceControllerDTDPageBlock
+		dtd.bufferPointerPage[3] =
+			dtd.bufferPointerPage[2] + deviceControllerDTDPageBlock
+		dtd.bufferPointerPage[4] =
+			dtd.bufferPointerPage[3] + deviceControllerDTDPageBlock
+
+		// save original buffer and length to transfer
+		dtd.originalBuffer = deviceControllerOriginalBuffer{
+			originalBufferOffset: uint16(dtd.bufferPointerPage[0]) &
+				deviceControllerDTDPageOffsetMsk,
+			originalBufferLength: sendLength,
+			dtdInvalid:           0,
+		}.pack()
+
+		// set IOC field in final DTD
+		ioc := uint8(0)
+		if 0 == length {
+			ioc = 1
+		}
+		// set DTD active flag
+		dtd.dtdToken = deviceControllerDTDToken{
+			status:     deviceControllerDTDStatusActive,
+			ioc:        ioc,
+			totalBytes: uint16(sendLength),
+		}.pack()
+
+		// update buffer offset
+		currentIndex += int(sendLength)
+
+		// add DTD to in-use queue
+		if nil != dc.dtdTail[endpointIndex] {
+			dc.dtdTail[endpointIndex].nextDTDPointer = dtd
+			dc.dtdTail[endpointIndex] = dtd
+		} else {
+			dc.dtdHead[endpointIndex] = dtd
+			dc.dtdTail[endpointIndex] = dtd
+			qhIdle = true
+		}
+
+		if 0 == length {
+			break
+		}
+	}
+
+	if specEndpointControl == endpoint && specIn == direction {
+		// get last setup packet
+		setupIndex := int(endpoint << 1)
+		setupQH := getQHBuffer(dc.port, 0, setupIndex)
+		setupMaxSize := uint32(setupQH.capabilities&0x07FF0000) >> 16 // bits 15-26: maxPacketSize
+		setupBufferHi := setupQH.setupBufferBack[1]
+		setupLength := (setupBufferHi & 0xFFFF0000) >> 16 // bits 15-31: wLength
+		if 0 != qh.endpointStatus&0x2 {                   // bit 1: ZLT
+			if (0 != sendLength) && (sendLength < setupLength) &&
+				(0 == (sendLength % setupMaxSize)) {
+				// enable ZLT (zlt==0)
+				setupQH.capabilities &^= deviceControllerCapabilities{zlt: 1}.pack()
+			}
+		}
+	}
+
+	// check if QH is empty
+	if !qhIdle {
+		// if prime bit is set, nothing left to do
+		if dc.bus.ENDPTPRIME.HasBits(primeBit) {
+			return statusSuccess
+		}
+		// wait to safely transmit DTD
+		for {
+			dc.bus.USBCMD.SetBits(nxp.USB_USBCMD_ATDTW)
+			_ = dc.bus.ENDPTSTAT.Get() // read-clear endpoint status register
+			if dc.bus.USBCMD.HasBits(nxp.USB_USBCMD_ATDTW) {
+				break
+			}
+		}
+		dc.bus.USBCMD.ClearBits(nxp.USB_USBCMD_ATDTW)
+	}
+
+	// if QH is empty or the endpoint is not primed, need to link current DTD head
+	// to the QH. if endpoint is not primed and qhIdle is false, QH is empty.
+	if qhIdle || 0 == epStatus&primeBit {
+		qh.nextDTDPointer = dtdHead
+		qh.dtdToken = 0
+		dc.bus.ENDPTPRIME.Set(primeBit)
+		primeAttempt := 0
+		for !dc.bus.ENDPTSTAT.HasBits(primeBit) {
+			if primeAttempt++; primeAttempt >= configDeviceControllerMaxPrimeAttempts {
+				return statusError
+			}
+			if dc.bus.ENDPTCOMPLETE.HasBits(primeBit) {
+				break
+			}
+			dc.bus.ENDPTPRIME.Set(primeBit)
+		}
+	}
+
 	return statusSuccess
 }
 
+func (dc *deviceControl) send(address uint8, buffer []uint8, length uint32) status {
+	return dc.transfer((address&specDescriptorEndpointAddressNumberMsk)|
+		(specIn<<specDescriptorEndpointAddressDirectionPos), buffer, length)
+}
+
 func (dc *deviceControl) receive(address uint8, buffer []uint8, length uint32) status {
-	return statusSuccess
+	return dc.transfer((address&specDescriptorEndpointAddressNumberMsk)|
+		(specOut<<specDescriptorEndpointAddressDirectionPos), buffer, length)
 }
 
 func (dc *deviceControl) cancel(address uint8) status {
@@ -328,10 +488,10 @@ func (dc *deviceControl) resetState() status {
 	dc.dtdFree = dc.dtd
 	p := dc.dtdFree
 	for i := 1; i < configDeviceControllerMaxDTD; i++ {
-		(*p).nextDTDPointer = getDTDBuffer(dc.port, i)
-		p = (*p).nextDTDPointer
+		p.nextDTDPointer = getDTDBuffer(dc.port, i)
+		p = p.nextDTDPointer
 	}
-	(*p).nextDTDPointer = nil
+	p.nextDTDPointer = nil
 	dc.dtdCount = configDeviceControllerMaxDTD
 
 	// no interrupt threshold
@@ -345,15 +505,15 @@ func (dc *deviceControl) resetState() status {
 
 	for i := 0; i < 2*configDeviceMaxEndpoints; i++ {
 		qh := getQHBuffer(dc.port, 0, i)
-		(*qh).capabilities =
+		qh.capabilities =
 			deviceControllerCapabilities{
 				maxPacketSize: configDeviceControllerMaxPacketSize,
 			}.pack()
-		(*qh).endpointStatus =
+		qh.endpointStatus =
 			deviceControllerEndpointStatus{
 				isOpened: 0,
 			}.pack()
-		(*qh).nextDTDPointer = deviceControllerDTDTerminate
+		qh.nextDTDPointer = deviceControllerDTDTerminate
 		dc.dtdHead[i] = nil
 		dc.dtdTail[i] = nil
 	}

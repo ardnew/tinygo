@@ -71,7 +71,7 @@ type (
 
 	deviceControllerOriginalBufferBitmap uint32
 	deviceControllerOriginalBuffer       struct {
-		originalBufferOffest uint16 // 12 (bits)
+		originalBufferOffset uint16 // 12 (bits)
 		originalBufferLength uint32 // 19
 		dtdInvalid           uint8  // 1 (= 32 bits)
 	}
@@ -255,7 +255,7 @@ func (s deviceControllerEndpointStatus) pack() deviceControllerEndpointStatusBit
 
 func (s deviceControllerOriginalBuffer) pack() deviceControllerOriginalBufferBitmap {
 	return deviceControllerOriginalBufferBitmap(
-		((uint32(s.originalBufferOffest) & 0xFFF) << 0) | // uint16 // 12 (bits)
+		((uint32(s.originalBufferOffset) & 0xFFF) << 0) | // uint16 // 12 (bits)
 			((uint32(s.originalBufferLength) & 0x7FFFF) << 12) | // uint32 // 19
 			((uint32(s.dtdInvalid) & 0x1) << 31)) // uint8  // 1 (= 32 bits)
 }
