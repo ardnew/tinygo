@@ -135,9 +135,9 @@ func (dc *deviceControl) enable(enable bool) status {
 		// ensure D+ pulled down long enough for host to detect previous disconnect
 		delayMicrosec(5000)
 		return dc.control(deviceControlRun, nil)
+	} else {
+		return dc.control(deviceControlStop, nil)
 	}
-	// TODO: handle disabling
-	return statusSuccess
 }
 
 // interrupt is the base interrupt handler for all USB device interrupts.
@@ -205,13 +205,11 @@ func (dc *deviceControl) transfer(address uint8, buffer []uint8, length uint32) 
 
 	endpoint, direction := unpackEndpoint(address)
 	endpointIndex := int((endpoint << 1) | direction)
+	currentIndex := 0
 
 	primeBit := uint32(1) << ((address & specDescriptorEndpointAddressNumberMsk) +
 		((address & specDescriptorEndpointAddressDirectionMsk) >> 3))
-
-	epStatus := primeBit
-	currentIndex := 0
-	qhIdle := false
+	epStatus, qhIdle := primeBit, false
 
 	qh := getQHBuffer(dc.port, 0, endpointIndex)
 	if 0 == qh.endpointStatus&0x1 { // bit 0: isOpened
@@ -228,8 +226,10 @@ func (dc *deviceControl) transfer(address uint8, buffer []uint8, length uint32) 
 		return statusBusy
 	}
 
-	var dtdHead *deviceControllerDTD
-	var sendLength uint32
+	var (
+		dtdHead    *deviceControllerDTD
+		sendLength uint32
+	)
 
 	for {
 
@@ -306,10 +306,10 @@ func (dc *deviceControl) transfer(address uint8, buffer []uint8, length uint32) 
 		setupIndex := int(endpoint << 1)
 		setupQH := getQHBuffer(dc.port, 0, setupIndex)
 		setupMaxSize := uint32(setupQH.capabilities&0x07FF0000) >> 16 // bits 15-26: maxPacketSize
-		setupBufferHi := setupQH.setupBufferBack[1]
-		setupLength := (setupBufferHi & 0xFFFF0000) >> 16 // bits 15-31: wLength
-		if 0 != qh.endpointStatus&0x2 {                   // bit 1: ZLT
-			if (0 != sendLength) && (sendLength < setupLength) &&
+		var setup deviceSetup
+		setup.parse(setupQH.setupBufferBack[:])
+		if 0 != qh.endpointStatus&0x2 { // bit 1: ZLT
+			if (0 != sendLength) && (sendLength < uint32(setup.wLength)) &&
 				(0 == (sendLength % setupMaxSize)) {
 				// enable ZLT (zlt==0)
 				setupQH.capabilities &^= deviceControllerCapabilities{zlt: 1}.pack()
@@ -357,12 +357,12 @@ func (dc *deviceControl) transfer(address uint8, buffer []uint8, length uint32) 
 
 func (dc *deviceControl) send(address uint8, buffer []uint8, length uint32) status {
 	return dc.transfer((address&specDescriptorEndpointAddressNumberMsk)|
-		(specIn<<specDescriptorEndpointAddressDirectionPos), buffer, length)
+		(specDescriptorEndpointAddressDirectionIn), buffer, length)
 }
 
 func (dc *deviceControl) receive(address uint8, buffer []uint8, length uint32) status {
 	return dc.transfer((address&specDescriptorEndpointAddressNumberMsk)|
-		(specOut<<specDescriptorEndpointAddressDirectionPos), buffer, length)
+		(specDescriptorEndpointAddressDirectionOut), buffer, length)
 }
 
 func (dc *deviceControl) cancel(address uint8) status {
@@ -411,21 +411,43 @@ func (dc *deviceControl) control(command deviceControlID, param interface{}) (s 
 
 	case deviceControlGetDeviceStatus:
 		// param should be a pointer to uint16, acting as output parameter.
-		status, ok := param.(*uint16)
+		stat, ok := param.(*uint16)
 		if !ok {
-			return statusInvalidController
+			return statusInvalidParameter
 		}
 		// configDeviceSelfPowered is a configuration constant on iMXRT1062
-		*status = configDeviceSelfPowered <<
+		*stat = configDeviceSelfPowered <<
 			specRequestStandardGetStatusDeviceSelfPoweredPos
 
 	case deviceControlGetEndpointStatus:
-		// TODO
+		// param should be pointer to deviceEndpointStatus, acting as output
+		// parameter.
+		stat, ok := param.(*deviceEndpointStatus)
+		if !ok {
+			return statusInvalidParameter
+		}
+		endpoint, direction := unpackEndpoint(stat.address)
+		if endpoint >= configDeviceMaxEndpoints {
+			return statusInvalidParameter
+		}
+		mask := uint32(nxp.USB_ENDPTCTRL0_RXS)
+		if specOut != direction {
+			mask = nxp.USB_ENDPTCTRL0_TXS
+		}
+		ctrl := dc.endpointControlRegister(endpoint)
+		if nil == ctrl {
+			return statusInvalidParameter
+		}
+		if ctrl.HasBits(mask) {
+			stat.status = uint16(deviceEndpointStateStalled)
+		} else {
+			stat.status = uint16(deviceEndpointStateIdle)
+		}
 
 	case deviceControlPreSetDeviceAddress:
 		address, ok := param.(uint8)
 		if !ok {
-			return statusInvalidController
+			return statusInvalidParameter
 		}
 		dc.bus.DEVICEADDR.Set((uint32(address) << nxp.USB_DEVICEADDR_USBADR_Pos) |
 			nxp.USB_DEVICEADDR_USBADRA_Msk)
@@ -447,7 +469,7 @@ func (dc *deviceControl) control(command deviceControlID, param interface{}) (s 
 		// param should be a pointer to uint8, acting as output parameter.
 		speed, ok := param.(*uint8)
 		if !ok {
-			return statusInvalidController
+			return statusInvalidParameter
 		}
 		*speed = dc.speed
 
@@ -533,6 +555,8 @@ func (dc *deviceControl) resetState() status {
 
 func (dc *deviceControl) reset() {
 
+	println("reset")
+
 	// clear setup flag
 	dc.bus.ENDPTSETUPSTAT.Set(dc.bus.ENDPTSETUPSTAT.Get())
 	// clear endpoint complete flag
@@ -553,15 +577,119 @@ func (dc *deviceControl) reset() {
 }
 
 func (dc *deviceControl) tokenDone() {
-
+	println("token done")
 }
 
 func (dc *deviceControl) portChange() {
-
+	// check if port is resetting
+	if !dc.bus.PORTSC1.HasBits(nxp.USB_PORTSC1_PR) {
+		// not resetting, update bus speed
+		if dc.bus.PORTSC1.HasBits(nxp.USB_PORTSC1_HSP) {
+			dc.speed = specSpeedHigh
+		} else {
+			dc.speed = specSpeedFull
+		}
+		// if reset flag is set, notify device layer reset has finished
+		if dc.isResetting {
+			dc.device.notify(
+				deviceNotification{
+					buffer:  nil,
+					length:  0,
+					code:    deviceNotifyBusReset,
+					isSetup: false,
+				})
+			dc.isResetting = false
+		}
+	}
 }
 
 func (dc *deviceControl) frameStart() {
+	println("frame start")
+}
 
+func (dc *deviceControl) endpointControlRegister(endpoint uint8) *volatile.Register32 {
+	endpoint &= specDescriptorEndpointAddressNumberMsk
+	if endpoint < configDeviceMaxEndpoints {
+		switch endpoint {
+		case 0:
+			return &dc.bus.ENDPTCTRL0
+		case 1:
+			return &dc.bus.ENDPTCTRL1
+		case 2:
+			return &dc.bus.ENDPTCTRL2
+		case 3:
+			return &dc.bus.ENDPTCTRL3
+		case 4:
+			return &dc.bus.ENDPTCTRL4
+		case 5:
+			return &dc.bus.ENDPTCTRL5
+		case 6:
+			return &dc.bus.ENDPTCTRL6
+		case 7:
+			return &dc.bus.ENDPTCTRL7
+		}
+	}
+	return nil
+}
+
+func (dc *deviceControl) cancelControlPipe(endpoint, direction uint8) status {
+	index := (endpoint << 1) + direction
+	message := deviceNotification{
+		buffer: nil,
+		length: 0,
+	}
+
+	// get DTD of control pipe
+	currentDTD := (*deviceControllerDTD)(unsafe.Pointer(
+		uintptr(unsafe.Pointer(dc.dtdHead[index])) & deviceControllerDTDPointerMsk))
+
+	for nil != currentDTD {
+		originalBuffer := currentDTD.originalBuffer.unpack()
+		dtdToken := currentDTD.dtdToken.unpack()
+
+		// pass transfer buffer address
+		if nil == message.buffer {
+			message.buffer = *(*[]uint8)(unsafe.Pointer(
+				uintptr((currentDTD.bufferPointerPage[0] & deviceControllerDTDPageMsk) |
+					uint32(originalBuffer.originalBufferOffset))))
+		}
+		if 0 != dtdToken.status&deviceControllerDTDStatusActive {
+			message.length = packU32(deviceCDCACMBufferInvalid32)
+		} else {
+			message.length += originalBuffer.originalBufferLength - uint32(dtdToken.totalBytes)
+		}
+
+		if dc.dtdHead[index] == dc.dtdTail[index] {
+			dc.dtdHead[index] = nil
+			dc.dtdTail[index] = nil
+			qh := getQHBuffer(dc.port, 0, int(index))
+			qh.nextDTDPointer = deviceControllerDTDTerminate
+			qh.dtdToken = 0
+		} else {
+			dc.dtdHead[index] = dc.dtdHead[index].nextDTDPointer
+		}
+
+		if 0 != currentDTD.dtdToken.unpack().ioc ||
+			0 == uintptr(unsafe.Pointer(dc.dtdHead[index]))&deviceControllerDTDPointerMsk {
+			message.code = deviceNotificationID(endpoint |
+				(direction << specDescriptorEndpointAddressDirectionPos))
+			message.isSetup = false
+			dc.device.notify(message)
+			message.buffer = nil
+			message.length = 0
+		}
+
+		currentDTD.dtdToken = 0
+		currentDTD.nextDTDPointer = dc.dtdFree
+		dc.dtdFree = currentDTD
+		dc.dtdCount++
+
+		// get DTD of control pipe
+		currentDTD = (*deviceControllerDTD)(unsafe.Pointer(
+			uintptr(unsafe.Pointer(dc.dtdHead[index])) & deviceControllerDTDPointerMsk))
+
+	}
+	return statusSuccess
 }
 
 func (dc *deviceControl) initEndpoint(config *deviceEndpointConfig) status {

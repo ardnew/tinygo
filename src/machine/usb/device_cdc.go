@@ -100,36 +100,36 @@ const (
 	deviceCDCRequestGetUnitParameter            = 0x38 // CDC request GET_UNIT_PARAMETER
 	deviceCDCRequestClearUnitParameter          = 0x39 // CDC request CLEAR_UNIT_PARAMETER
 	deviceCDCRequestSetEthernetMulticastFilters = 0x40 // CDC request SET_ETHERNET_MULTICAST_FILTERS
-	deviceCDCRequestSetEthernetPowPatterFilter  = 0x41 // CDC request SET_ETHERNET_POW_PATTER_FILTER
-	deviceCDCRequestGetEthernetPowPatterFilter  = 0x42 // CDC request GET_ETHERNET_POW_PATTER_FILTER
+	deviceCDCRequestSetEthernetPowPatternFilter = 0x41 // CDC request SET_ETHERNET_POW_PATTER_FILTER
+	deviceCDCRequestGetEthernetPowPatternFilter = 0x42 // CDC request GET_ETHERNET_POW_PATTER_FILTER
 	deviceCDCRequestSetEthernetPacketFilter     = 0x43 // CDC request SET_ETHERNET_PACKET_FILTER
 	deviceCDCRequestGetEthernetStatistic        = 0x44 // CDC request GET_ETHERNET_STATISTIC
-	deviceCDCRequestSetAtmDataFormat            = 0x50 // CDC request SET_ATM_DATA_FORMAT
-	deviceCDCRequestGetAtmDeviceStatistics      = 0x51 // CDC request GET_ATM_DEVICE_STATISTICS
-	deviceCDCRequestSetAtmDefaultVc             = 0x52 // CDC request SET_ATM_DEFAULT_VC
-	deviceCDCRequestGetAtmVcStatistics          = 0x53 // CDC request GET_ATM_VC_STATISTICS
-	deviceCDCRequestMdlmSpecificRequestsMask    = 0x7F // CDC request MDLM_SPECIFIC_REQUESTS_MASK
+	deviceCDCRequestSetATMDataFormat            = 0x50 // CDC request SET_ATM_DATA_FORMAT
+	deviceCDCRequestGetATMDeviceStatistics      = 0x51 // CDC request GET_ATM_DEVICE_STATISTICS
+	deviceCDCRequestSetATMDefaultVC             = 0x52 // CDC request SET_ATM_DEFAULT_VC
+	deviceCDCRequestGetATMVCStatistics          = 0x53 // CDC request GET_ATM_VC_STATISTICS
+	deviceCDCRequestMDLMSpecificRequestsMask    = 0x7F // CDC request MDLM_SPECIFIC_REQUESTS_MASK
 
-	deviceCDCNotifNetworkConnection     = 0x00 // CDC notify NETWORK_CONNECTION
-	deviceCDCNotifResponseAvail         = 0x01 // CDC notify RESPONSE_AVAIL
-	deviceCDCNotifAuxJackHookState      = 0x08 // CDC notify AUX_JACK_HOOK_STATE
-	deviceCDCNotifRingDetect            = 0x09 // CDC notify RING_DETECT
-	deviceCDCNotifSerialState           = 0x20 // CDC notify SERIAL_STATE
-	deviceCDCNotifCallStateChange       = 0x28 // CDC notify CALL_STATE_CHANGE
-	deviceCDCNotifLineStateChange       = 0x29 // CDC notify LINE_STATE_CHANGE
-	deviceCDCNotifConnectionSpeedChange = 0x2A // CDC notify CONNECTION_SPEED_CHANGE
+	deviceCDCNotifyNetworkConnection     = 0x00 // CDC notify NETWORK_CONNECTION
+	deviceCDCNotifyResponseAvail         = 0x01 // CDC notify RESPONSE_AVAIL
+	deviceCDCNotifyAuxJackHookState      = 0x08 // CDC notify AUX_JACK_HOOK_STATE
+	deviceCDCNotifyRingDetect            = 0x09 // CDC notify RING_DETECT
+	deviceCDCNotifySerialState           = 0x20 // CDC notify SERIAL_STATE
+	deviceCDCNotifyCallStateChange       = 0x28 // CDC notify CALL_STATE_CHANGE
+	deviceCDCNotifyLineStateChange       = 0x29 // CDC notify LINE_STATE_CHANGE
+	deviceCDCNotifyConnectionSpeedChange = 0x2A // CDC notify CONNECTION_SPEED_CHANGE
 
 	deviceCDCFeatureAbstractState  = 0x01 // CDC feature select ABSTRACT_STATE
 	deviceCDCFeatureCountrySetting = 0x02 // CDC feature select COUNTRY_SETTING
 
 	deviceCDCControlSigBitmapCarrierActivation = 0x02 // CDC control signal CARRIER_ACTIVATION
-	deviceCDCControlSigBitmapDtePresence       = 0x01 // CDC control signal DTE_PRESENCE
-	deviceCDCUartStateRxCarrier                = 0x01 // UART state RX_CARRIER
-	deviceCDCUartStateTxCarrier                = 0x02 // UART state TX_CARRIER
-	deviceCDCUartStateBreak                    = 0x04 // UART state BREAK
-	deviceCDCUartStateRingSignal               = 0x08 // UART state RING_SIGNAL
-	deviceCDCUartStateFraming                  = 0x10 // UART state FRAMING
-	deviceCDCUartStateParity                   = 0x20 // UART state PARITY
-	deviceCDCUartStateOverrun                  = 0x40 // UART state OVERRUN
+	deviceCDCControlSigBitmapDTEPresence       = 0x01 // CDC control signal DTE_PRESENCE
+	deviceCDCUARTStateRxCarrier                = 0x01 // UART state RX_CARRIER
+	deviceCDCUARTStateTxCarrier                = 0x02 // UART state TX_CARRIER
+	deviceCDCUARTStateBreak                    = 0x04 // UART state BREAK
+	deviceCDCUARTStateRingSignal               = 0x08 // UART state RING_SIGNAL
+	deviceCDCUARTStateFraming                  = 0x10 // UART state FRAMING
+	deviceCDCUARTStateParity                   = 0x20 // UART state PARITY
+	deviceCDCUARTStateOverrun                  = 0x40 // UART state OVERRUN
 
 )

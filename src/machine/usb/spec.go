@@ -19,16 +19,16 @@ const (
 	specIn  = 1
 
 	// USB standard descriptor length
-	specDescriptorLengthDevice                         = 0x12
-	specDescriptorLengthConfigure                      = 0x09
-	specDescriptorLengthInterface                      = 0x09
-	specDescriptorLengthEndpoint                       = 0x07
-	specDescriptorLengthEndpointCompanion              = 0x06
-	specDescriptorLengthDeviceQualitier                = 0x0A
+	specDescriptorLengthDevice                         = 18
+	specDescriptorLengthConfigure                      = 9
+	specDescriptorLengthInterface                      = 9
+	specDescriptorLengthEndpoint                       = 7
+	specDescriptorLengthEndpointCompanion              = 6
+	specDescriptorLengthDeviceQualitier                = 10
 	specDescriptorLengthOTGDescriptor                  = 5
 	specDescriptorLengthBOSDescriptor                  = 5
-	specDescriptorLengthDeviceCapabilityUSB20Extension = 0x07
-	specDescriptorLengthDeviceCapabilitySuperspeed     = 0x0A
+	specDescriptorLengthDeviceCapabilityUSB20Extension = 7
+	specDescriptorLengthDeviceCapabilitySuperspeed     = 10
 
 	// USB device capability type codes
 	specDescriptorTypeDeviceCapabilityWireless       = 0x01
@@ -52,6 +52,9 @@ const (
 	specDescriptorTypeHID         = 0x21
 	specDescriptorTypeHIDReport   = 0x22
 	specDescriptorTypeHIDPhysical = 0x23
+
+	specDescriptorTypeCDCInterface = 0x24
+	specDescriptorTypeCDCEndpoint  = 0x25
 
 	specDescriptorTypeEndpointCompanion = 0x30
 

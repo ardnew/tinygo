@@ -37,6 +37,7 @@ const (
 	statusEHCIAttached                     // EHCI attached
 	statusEHCIDetached                     // EHCI detached
 	statusDataOverRun                      // Endpoint data (Rx) exceeds max size
+	statusNotImplemented                   // Supported feature not implemented
 
 	modeIdle   mode = iota // USB core idle (unallocated)
 	modeDevice             // USB device mode
@@ -120,58 +121,63 @@ func (p *port) process() status {
 // The given deviceClassEventHandler is called for any USB device-level event
 // notifications received, which allows an upper-layer CDC-ACM driver (such as
 // a UART interface implementation) the opportunity to handle device events.
-func (p *port) initCDCACM(handler deviceClassEventHandler) (*deviceCDCACM, *deviceClass) {
+func (p *port) initCDCACM(id uint8, handler deviceClassEventHandler) (*deviceCDCACM, *deviceClass) {
 
 	// verify a valid port was provided
 	if nil == p || nil == p.device.controller || p.mode != modeDevice {
 		return nil, nil
 	}
 
+	if 0 == id || int(id) > len(configDeviceCDCACM[p.device.port]) {
+		return nil, nil
+	}
+
 	// get a reference to each of the class interfaces
-	comm := &deviceCDCACMConfigInstance[p.device.port][0].info.interfaceList[0]
-	data := &deviceCDCACMConfigInstance[p.device.port][0].info.interfaceList[1]
+	comm := &deviceCDCACMConfigInstance[p.device.port][id-1].info.interfaceList[0]
+	data := &deviceCDCACMConfigInstance[p.device.port][id-1].info.interfaceList[1]
 
 	// configDeviceCDCACM must be defined per package API. these settings will be
 	// platform-specific, and will probably be implemented in a build tag-
 	// constrained source file. the length of this array corresponds to the number
 	// of USB CDC-ACM ports that are being created, and the index of each element
-	// corresponds to the physical USB port (core index).
+	// corresponds to the physical USB port (core index). Each element is a slice
+	// of alternate device configurations that may be selected for a given port.
 
 	// CDC-ACM Communication/control interface
 	comm.interfaceNumber =
-		configDeviceCDCACM[p.device.port].commInterfaceIndex
+		configDeviceCDCACM[p.device.port][id-1].commInterfaceIndex
 
 	comm.deviceInterface[0].endpoint[0].address =
-		configDeviceCDCACM[p.device.port].commInterruptInEndpoint |
+		configDeviceCDCACM[p.device.port][id-1].commInterruptInEndpoint |
 			specDescriptorEndpointAddressDirectionIn
 
 	comm.deviceInterface[0].endpoint[0].maxPacketSize =
-		configDeviceCDCACM[p.device.port].commInterruptInPacketSize
+		configDeviceCDCACM[p.device.port][id-1].commInterruptInPacketSize
 
 	comm.deviceInterface[0].endpoint[0].interval =
-		configDeviceCDCACM[p.device.port].commInterruptInInterval
+		configDeviceCDCACM[p.device.port][id-1].commInterruptInInterval
 
 	// CDC-ACM Data interface
 	data.interfaceNumber =
-		configDeviceCDCACM[p.device.port].dataInterfaceIndex
+		configDeviceCDCACM[p.device.port][id-1].dataInterfaceIndex
 
 	data.deviceInterface[0].endpoint[0].address =
-		configDeviceCDCACM[p.device.port].dataBulkInEndpoint |
+		configDeviceCDCACM[p.device.port][id-1].dataBulkInEndpoint |
 			specDescriptorEndpointAddressDirectionIn
 
 	data.deviceInterface[0].endpoint[0].maxPacketSize =
-		configDeviceCDCACM[p.device.port].dataBulkInPacketSize
+		configDeviceCDCACM[p.device.port][id-1].dataBulkInPacketSize
 
 	data.deviceInterface[0].endpoint[1].address =
-		configDeviceCDCACM[p.device.port].dataBulkOutEndpoint |
+		configDeviceCDCACM[p.device.port][id-1].dataBulkOutEndpoint |
 			specDescriptorEndpointAddressDirectionOut
 
 	data.deviceInterface[0].endpoint[1].maxPacketSize =
-		configDeviceCDCACM[p.device.port].dataBulkOutPacketSize
+		configDeviceCDCACM[p.device.port][id-1].dataBulkOutPacketSize
 
 	// assign our configured CDC-ACM class to the receiver's device and call its
 	// class initialization routine(s).
-	cls := p.device.initClass(deviceCDCACMConfigInstance[p.device.port], handler)
+	cls := p.device.initClass(id, deviceCDCACMConfigInstance[p.device.port], handler)
 	acm := cls.config[0].driver.(*deviceCDCACM)
 
 	return acm, cls
@@ -224,6 +230,8 @@ func (s status) Error() string {
 		return "host detached"
 	case statusDataOverRun:
 		return "data overrun"
+	case statusNotImplemented:
+		return "feature not implemented"
 	default:
 		return "unknown error"
 	}

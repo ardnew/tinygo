@@ -3,19 +3,31 @@ package usb
 // Unexported USB device type definitions.
 type (
 	// deviceClassDriver defines the class driver interface.
+	//
+	// This interface is used internally to abstract communication between a USB
+	// device and the device class (e.g., CDC, HID, MSC, etc.) in which it is
+	// configured.
 	deviceClassDriver interface {
-		init(device *device, config *deviceClassConfig) status    // Class driver initialization- entry  of the class driver
-		deinit() status                                           // Class driver de-initialization
-		event(event deviceClassEventID, param interface{}) status // Class driver event callback
-		send(ep uint8, buffer []uint8, length uint32) status      // Class driver send to endpoint
-		receive(ep uint8, buffer []uint8, length uint32) status   // Class driver receive from endpoint
+		init(device *device, config *deviceClassConfig, id uint8) status // Class driver initialization- entry  of the class driver
+		deinit() status                                                  // Class driver de-initialization
+		event(event deviceClassEventID, param interface{}) status        // Class driver event callback
+		send(ep uint8, buffer []uint8, length uint32) status             // Class driver send to endpoint
+		receive(ep uint8, buffer []uint8, length uint32) status          // Class driver receive from endpoint
 	}
 
+	// deviceClassEventHandler defines the methods required to receive all device-
+	// and class-level event notifications on a given USB port.
+	//
+	// This interface is intended as the primary communication mechanism between
+	// a USB device (of any class) and the application layer using that device.
+	// Thus, it is meant to be implemented internally by one of the application's
+	// USB handlers (e.g., a serial UART driver using the CDC-ACM device class).
 	deviceClassEventHandler interface {
 		deviceEvent(ev deviceEventID, param interface{}) status
 		classEvent(ev uint32, param interface{}) status
 	}
 
+	// deviceEndpointController defines the method(s) required
 	deviceEndpointController interface {
 		controlEndpoint(message deviceEndpointControlMessage, param interface{}) status
 	}
@@ -32,6 +44,19 @@ type (
 	deviceEventID           uint8
 	deviceClassID           uint8
 	deviceControlRWSequence uint8
+
+	deviceDescriptorString *[]uint8
+
+	deviceDescriptorLanguage struct {
+		pString []deviceDescriptorString
+		ident   uint16
+	}
+
+	deviceDescriptor struct {
+		pDevice  *[]uint8
+		pConfig  *[]uint8
+		language []deviceDescriptorLanguage
+	}
 
 	deviceEndpointConfig struct {
 		maxPacketSize uint16 // Endpoint maximum packet size
@@ -54,12 +79,14 @@ type (
 	}
 
 	// deviceSetup contains the setup information for a USB device.
-	deviceSetup struct {
-		bmRequestType uint8
-		bRequest      uint8
-		wValue        uint16
-		wIndex        uint16
-		wLength       uint16
+	deviceSetupBitmap uint64
+	deviceSetupBuffer [deviceSetupSize]uint8
+	deviceSetup       struct {
+		bmRequestType uint8  //  8, 1 (bits, bytes)
+		bRequest      uint8  //  8, 1
+		wValue        uint16 // 16, 2
+		wIndex        uint16 // 16, 2
+		wLength       uint16 // 16, 2 (= 64 bits, 8 bytes)
 	}
 
 	deviceEndpointControlMessage struct {
@@ -171,12 +198,12 @@ type (
 	// 	length uint32  // Buffer length
 	// }
 
-	// // deviceGetDeviceDescriptor contains the result of a control request for:
-	// // get device descriptor
-	// deviceGetDeviceDescriptor struct {
-	// 	buffer []uint8 // Buffer
-	// 	length uint32  // Buffer length
-	// }
+	// deviceGetDeviceDescriptor contains the result of a control request for:
+	// get device descriptor
+	deviceGetDeviceDescriptor struct {
+		buffer []uint8 // Buffer
+		length uint32  // Buffer length
+	}
 
 	// // deviceGetDeviceQualifierDescriptor contains the result of a control
 	// // request for: get device qualifier descriptor
@@ -185,13 +212,13 @@ type (
 	// 	length uint32  // Buffer length
 	// }
 
-	// // deviceGetConfigurationDescriptor contains the result of a control request
-	// // for: get configuration descriptor
-	// deviceGetConfigurationDescriptor struct {
-	// 	buffer        []uint8 // Buffer
-	// 	length        uint32  // Buffer length
-	// 	configuration uint8   // The configuration number
-	// }
+	// deviceGetConfigurationDescriptor contains the result of a control request
+	// for: get configuration descriptor
+	deviceGetConfigurationDescriptor struct {
+		buffer        []uint8 // Buffer
+		length        uint32  // Buffer length
+		configuration uint8   // The configuration number
+	}
 
 	// // deviceGetBOSDescriptor contains the result of a control request for: get
 	// // bos descriptor
@@ -200,14 +227,14 @@ type (
 	// 	length uint32  // Buffer length
 	// }
 
-	// // deviceGetStringDescriptor contains the result of a control request for:
-	// // get string descriptor
-	// deviceGetStringDescriptor struct {
-	// 	buffer      []uint8 // Buffer
-	// 	length      uint32  // Buffer length
-	// 	languageID  uint16  // Language ID
-	// 	stringIndex uint8   // String index
-	// }
+	// deviceGetStringDescriptor contains the result of a control request for:
+	// get string descriptor
+	deviceGetStringDescriptor struct {
+		buffer      []uint8 // Buffer
+		length      uint32  // Buffer length
+		languageID  uint16  // Language ID
+		stringIndex uint8   // String index
+	}
 
 	// // deviceGetHIDDescriptor contains the result of a control request for: get
 	// // HID descriptor
@@ -369,7 +396,8 @@ const (
 )
 
 var (
-	deviceClassInstance [configDeviceCount]deviceClass
+	deviceClassInstance       [configDeviceCount]deviceClass
+	deviceSetupBufferInstance [configDeviceCount]deviceSetupBuffer
 
 	deviceEndpointControlInConfig = deviceEndpointConfig{
 		maxPacketSize: configDeviceControllerMaxPacketSize,
@@ -414,20 +442,26 @@ func (d *device) deinit() status {
 	return s
 }
 
-func (d *device) initClass(config []deviceClassConfig, handler deviceClassEventHandler) *deviceClass {
+func (d *device) initClass(id uint8, config []deviceClassConfig,
+	handler deviceClassEventHandler) *deviceClass {
 
 	// verify a device configuration was provided
 	if nil == d || nil == config || len(config) == 0 {
 		return nil
 	}
 
+	if 0 == id || int(id) > len(config) {
+		return nil
+	}
+
 	c := &deviceClassInstance[d.port]
+	b := &deviceSetupBufferInstance[d.port]
 
 	// initialize device class
 	c.device = d
 	c.config = config
 	c.handler = handler
-	c.setupBuffer = nil // TODO
+	c.setupBuffer = b[:]
 	c.transcationBuffer = 0
 
 	// add a class reference to the receiver
@@ -436,7 +470,7 @@ func (d *device) initClass(config []deviceClassConfig, handler deviceClassEventH
 	// initialze each of the device class drivers
 	for i := range c.config {
 		if nil != c.config[i].driver {
-			if !c.config[i].driver.init(d, &c.config[i]).OK() {
+			if !c.config[i].driver.init(d, &c.config[i], id).OK() {
 				// remove the driver from configuration if it fails initialization
 				c.config[i].driver = nil
 			}
@@ -475,12 +509,12 @@ func (d *device) transfer(address uint8, buffer []uint8, length uint32) status {
 
 func (d *device) send(address uint8, buffer []uint8, length uint32) status {
 	return d.transfer((address&specDescriptorEndpointAddressNumberMsk)|
-		(specIn<<specDescriptorEndpointAddressDirectionPos), buffer, length)
+		(specDescriptorEndpointAddressDirectionIn), buffer, length)
 }
 
 func (d *device) receive(address uint8, buffer []uint8, length uint32) status {
 	return d.transfer((address&specDescriptorEndpointAddressNumberMsk)|
-		(specOut<<specDescriptorEndpointAddressDirectionPos), buffer, length)
+		(specDescriptorEndpointAddressDirectionOut), buffer, length)
 }
 
 func (d *device) cancel(address uint8) status {
@@ -544,6 +578,26 @@ func (d *device) deinitEndpoint(address uint8) status {
 	return s
 }
 
+func (d *device) stallEndpoint(address uint8) status {
+
+	endpoint, _ := unpackEndpoint(address)
+
+	if endpoint >= configDeviceMaxEndpoints {
+		return statusInvalidParameter
+	}
+	return d.control(deviceControlEndpointStall, address)
+}
+
+func (d *device) unstallEndpoint(address uint8) status {
+
+	endpoint, _ := unpackEndpoint(address)
+
+	if endpoint >= configDeviceMaxEndpoints {
+		return statusInvalidParameter
+	}
+	return d.control(deviceControlEndpointUnstall, address)
+}
+
 func (d *device) feedback(setup *deviceSetup, status status, stage deviceControlRWSequence,
 	buffer *[]uint8, length *uint32) status {
 	direction := uint8(specIn)
@@ -553,8 +607,8 @@ func (d *device) feedback(setup *deviceSetup, status status, stage deviceControl
 			0 != setup.wLength && deviceControlPipeSetupStage == stage {
 			direction = specOut
 		}
-		return d.control(deviceControlEndpointStall,
-			specEndpointControl|(direction<<specDescriptorEndpointAddressDirectionPos))
+		return d.stallEndpoint(specEndpointControl |
+			(direction << specDescriptorEndpointAddressDirectionPos))
 	} else {
 		if *length > uint32(setup.wLength) {
 			*length = uint32(setup.wLength)
@@ -621,9 +675,7 @@ func (d *device) controlEndpoint(message deviceEndpointControlMessage, param int
 						length:  uint32(setup.wLength),
 						isSetup: true,
 					}
-					for i := range d.class.config {
-						_ = d.class.config[i].driver.event(deviceClassEventClassRequest, &req)
-					}
+					d.classEvent(deviceClassEventClassRequest, &req)
 					buffer = req.buffer
 					length = req.length
 				} else if (setup.bmRequestType & specRequestTypeTypeVendor) == specRequestTypeTypeVendor {
@@ -648,9 +700,7 @@ func (d *device) controlEndpoint(message deviceEndpointControlMessage, param int
 						length:  uint32(setup.wLength),
 						isSetup: true,
 					}
-					for i := range d.class.config {
-						_ = d.class.config[i].driver.event(deviceClassEventClassRequest, &req)
-					}
+					d.classEvent(deviceClassEventClassRequest, &req)
 					buffer = req.buffer
 					length = req.length
 				} else if (setup.bmRequestType & specRequestTypeTypeVendor) == specRequestTypeTypeVendor {
@@ -681,9 +731,7 @@ func (d *device) controlEndpoint(message deviceEndpointControlMessage, param int
 				length:  message.length,
 				isSetup: false,
 			}
-			for i := range d.class.config {
-				_ = d.class.config[i].driver.event(deviceClassEventClassRequest, &req)
-			}
+			d.classEvent(deviceClassEventClassRequest, &req)
 		} else if setup.bmRequestType&specRequestTypeTypeVendor == specRequestTypeTypeVendor {
 			req := deviceControlRequest{
 				setup:   setup,
@@ -768,6 +816,15 @@ func (d *device) requestSetInterface(
 func (d *device) requestSynchFrame(
 	setup *deviceSetup, buffer *[]uint8, length *uint32) status {
 	return statusSuccess
+}
+
+func (d *device) classEvent(ev deviceClassEventID, param interface{}) {
+	if nil != d.class && nil != d.class.config {
+		// route the event to all class configurations
+		for i := range d.class.config {
+			_ = d.class.config[i].driver.event(ev, param)
+		}
+	}
 }
 
 func (d *device) event(ev deviceEventID, param interface{}) {
@@ -921,6 +978,79 @@ func (d *device) setStatus(deviceStatus deviceStatusID, param interface{}) statu
 
 func (d *device) busSpeed(speed *uint8) status {
 	return d.status(deviceStatusSpeed, speed)
+}
+
+func (d *device) setBusSpeed(speed uint8) status {
+	// TODO
+	return statusSuccess
+}
+
+func (d *device) deviceDescriptor(desc *deviceGetDeviceDescriptor) status {
+	if int(d.port) < len(configDeviceCDCACMDescriptor) {
+		if nil != configDeviceCDCACMDescriptor[d.port].pDevice {
+			desc.buffer = *configDeviceCDCACMDescriptor[d.port].pDevice
+			desc.length = specDescriptorLengthDevice
+			return statusSuccess
+		}
+	}
+	return statusInvalidHandle
+}
+
+func (d *device) configurationDescriptor(desc *deviceGetConfigurationDescriptor) status {
+	if int(d.port) < len(configDeviceCDCACMDescriptor) {
+		if nil != configDeviceCDCACMDescriptor[d.port].pConfig {
+			desc.buffer = *configDeviceCDCACMDescriptor[d.port].pConfig
+			desc.length = uint32(descriptorConfigurationCDCACMSize)
+			return statusSuccess
+		}
+	}
+	return statusInvalidHandle
+}
+
+func (d *device) stringDescriptor(desc *deviceGetStringDescriptor) status {
+	if 0 == desc.stringIndex {
+		desc.buffer = descriptorStringCDCACMLanguage
+		desc.length = uint32(len(descriptorStringCDCACMLanguage))
+		return statusSuccess
+	}
+	if int(d.port) < len(configDeviceCDCACMDescriptor) {
+		for _, lang := range configDeviceCDCACMDescriptor[d.port].language {
+			if desc.languageID == lang.ident {
+				if int(desc.stringIndex) < len(lang.pString) {
+					desc.buffer = *lang.pString[desc.stringIndex]
+					desc.length = uint32(len(desc.buffer))
+				}
+			}
+		}
+	}
+	return statusInvalidRequest
+}
+
+func (s deviceSetup) pack() deviceSetupBitmap {
+	return deviceSetupBitmap(
+		((uint64(s.bmRequestType) & 0xFF) << 0) | // uint8  // 8 (bits)
+			((uint64(s.bRequest) & 0xFF) << 8) | // uint8  // 8
+			((uint64(s.wValue) & 0xFFFF) << 16) | // uint16 // 16
+			((uint64(s.wIndex) & 0xFFFF) << 32) | // uint16 // 16
+			((uint64(s.wLength) & 0xFFFF) << 48)) // uint16 // 16 (= 64 bits)
+}
+
+func (s deviceSetup) bytes() deviceSetupBuffer {
+	return [deviceSetupSize]uint8{
+		s.bmRequestType,
+		s.bRequest,
+		// for 16-bit words: low-byte is at index N, high-byte is at N+1
+		uint8(s.wValue), uint8(s.wValue >> 8),
+		uint8(s.wIndex), uint8(s.wIndex >> 8),
+		uint8(s.wLength), uint8(s.wLength >> 8),
+	}
+}
+
+func (s deviceSetupBitmap) bytes() deviceSetupBuffer {
+	return [deviceSetupSize]uint8{
+		uint8(s >> 0), uint8(s >> 8), uint8(s >> 16), uint8(s >> 24),
+		uint8(s >> 32), uint8(s >> 40), uint8(s >> 48), uint8(s >> 56),
+	}
 }
 
 func (s *deviceSetup) parse(buffer []uint8) status {

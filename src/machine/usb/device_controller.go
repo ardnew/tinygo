@@ -83,8 +83,8 @@ type (
 		dtdToken          deviceControllerDTDTokenBitmap       // 4
 		bufferPointerPage [5]uint32                            // 20
 		reserved1         uint32                               // 4
-		setupBuffer       [2]uint32                            // 8
-		setupBufferBack   [2]uint32                            // 8
+		setupBuffer       deviceSetupBuffer                    // 8
+		setupBufferBack   deviceSetupBuffer                    // 8
 		endpointStatus    deviceControllerEndpointStatusBitmap // 4
 		reserved2         uint32                               // 4 (= 64 bytes)
 	}
@@ -247,6 +247,18 @@ func (s deviceControllerDTDToken) pack() deviceControllerDTDTokenBitmap {
 			((uint32(s.reserved3) & 0x1) << 31)) // uint8  // 1 (= 32 bits)
 }
 
+func (b deviceControllerDTDTokenBitmap) unpack() deviceControllerDTDToken {
+	return deviceControllerDTDToken{
+		status:             uint8(b>>0) & 0xFF,
+		reserved1:          uint8(b>>8) & 0x3,
+		multiplierOverride: uint8(b>>10) & 0x3,
+		reserved2:          uint8(b>>12) & 0x7,
+		ioc:                uint8(b>>15) & 0x1,
+		totalBytes:         uint16(b>>16) & 0x7FFF,
+		reserved3:          uint8(b>>31) & 0x1,
+	}
+}
+
 func (s deviceControllerEndpointStatus) pack() deviceControllerEndpointStatusBitmap {
 	return deviceControllerEndpointStatusBitmap(
 		((uint32(s.isOpened) & 0x1) << 0) | // uint8  // 1 (bits)
@@ -258,6 +270,14 @@ func (s deviceControllerOriginalBuffer) pack() deviceControllerOriginalBufferBit
 		((uint32(s.originalBufferOffset) & 0xFFF) << 0) | // uint16 // 12 (bits)
 			((uint32(s.originalBufferLength) & 0x7FFFF) << 12) | // uint32 // 19
 			((uint32(s.dtdInvalid) & 0x1) << 31)) // uint8  // 1 (= 32 bits)
+}
+
+func (b deviceControllerOriginalBufferBitmap) unpack() deviceControllerOriginalBuffer {
+	return deviceControllerOriginalBuffer{
+		originalBufferOffset: uint16(b>>0) & 0xFFF,
+		originalBufferLength: uint32(b>>12) & 0x7FFFF,
+		dtdInvalid:           uint8(b>>31) & 0x1,
+	}
 }
 
 // cycles converts the given number of microseconds to CPU cycles for a CPU with

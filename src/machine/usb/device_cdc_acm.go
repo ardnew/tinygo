@@ -34,23 +34,32 @@ type (
 	}
 
 	deviceCDCACM struct {
-		device          *device            // The handle of the USB device.
-		config          *deviceClassConfig // The class configure structure.
-		comm            *deviceInterface   // The CDC communication interface handle.
-		data            *deviceInterface   // The CDC data interface handle.
-		bulkIn          deviceCDCACMPipe   // The bulk in pipe for sending packet to host.
-		bulkOut         deviceCDCACMPipe   // The bulk out pipe for receiving packet from host.
-		interruptIn     deviceCDCACMPipe   // The interrupt in pipe for notifying the device state to host.
-		interfaceNumber uint8              // The current interface number.
-		alternate       uint8              // The alternate setting value of the interface.
-		hasSentState    bool               // The device has primed the state in interrupt pipe
-		speed           uint8              // Speed of USB device (Full/Low/High)
-		lineCodingSize  uint32             // Size of line-coding message
-		baudRate        uint32             // Data terminal rate
-		charFormat      uint32             // Character format
-		parityType      uint32             // Parity type
-		dataBits        uint32             // Data word size
+		device          *device                 // The handle of the USB device.
+		config          *deviceClassConfig      // The class configure structure.
+		info            deviceCDCACMInfo        // The ACM serial state.
+		comm            *deviceInterface        // The CDC communication interface handle.
+		data            *deviceInterface        // The CDC data interface handle.
+		sendBuffer      *deviceCDCACMDataBuffer // Pointer to the global send buffer
+		recvBuffer      *deviceCDCACMDataBuffer // Pointer to the global receive buffer
+		bulkIn          deviceCDCACMPipe        // The bulk in pipe for sending packet to host.
+		bulkOut         deviceCDCACMPipe        // The bulk out pipe for receiving packet from host.
+		interruptIn     deviceCDCACMPipe        // The interrupt in pipe for notifying the device state to host.
+		interfaceNumber uint8                   // The current interface number.
+		alternate       uint8                   // The alternate setting value of the interface.
+		hasSentState    bool                    // The device has primed the state in interrupt pipe
+		speed           uint8                   // Speed of USB device (Full/Low/High)
+		lineCodingSize  uint32                  // Size of line-coding message
+		baudRate        uint32                  // Data terminal rate
+		charFormat      uint32                  // Character format
+		parityType      uint32                  // Parity type
+		dataBits        uint32                  // Data word size
+		sendSize        uint32                  // Number of bytes scheduled in global send buffer
+		recvSize        uint32                  // Number of bytes scheduled in global receive buffer
 	}
+
+	deviceCDCACMDataBuffer    [configDeviceBufferSize]uint8
+	deviceCDCACMAlternateList [configDeviceCDCACMInterfaceCount]uint16
+	deviceCDCACMSerialState   [deviceCDCACMSerialStateSize]uint8
 
 	deviceCDCACMRequestParam struct {
 		buffer         *[]uint8 // The pointer to the address of the buffer for CDC class request.
@@ -67,6 +76,15 @@ type (
 		ep             uint8   // The endpoint number of the pipe.
 		isBusy         bool    // The pipe is transferring packet
 	}
+
+	deviceCDCACMInfo struct {
+		serialState      deviceCDCACMSerialState // Serial state buffer of the CDC device to notify the serial state to host.
+		dtePresent       bool                    // A flag to indicate whether DTE is present.
+		breakDuration    uint16                  // Length of time in milliseconds of the break signal
+		dteStatus        uint8                   // Status of data terminal equipment
+		currentInterface uint8                   // Current interface index.
+		uartState        uint16                  // UART state of the CDC device.
+	}
 )
 
 const (
@@ -82,9 +100,24 @@ const (
 	deviceCDCACMEventSetLineCoding                                          // This event indicates the device received the SET_LINE_CODING request.
 	deviceCDCACMEventSetControlLineState                                    // This event indicates the device received the SET_CONTRL_LINE_STATE request.
 	deviceCDCACMEventSendBreak                                              // This event indicates the device received the SEND_BREAK request.
+
+	deviceCDCACMRequestNotify = 0xA1
+
+	deviceCDCACMInfoNotifyPacketSize = 8 // (bytes)
+	deviceCDCACMInfoUARTBitmapSize   = 2 //
+	deviceCDCACMSerialStateSize      = deviceCDCACMInfoNotifyPacketSize + deviceCDCACMInfoUARTBitmapSize
 )
 
 var (
+	deviceCDCACMDataSendBuffer = [configDeviceCDCACMCount]deviceCDCACMDataBuffer{}
+	deviceCDCACMDataRecvBuffer = [configDeviceCDCACMCount]deviceCDCACMDataBuffer{}
+
+	deviceCDCACMLineCoding = [configDeviceCDCACMCount][][]uint8{
+		{ // USB CDC-ACM port 0
+			{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, // configuration index 1
+		},
+	}
+
 	deviceCDCACMConfigInstance = [configDeviceCDCACMCount][]deviceClassConfig{
 		{{
 			driver: &deviceCDCACM{},
@@ -122,19 +155,32 @@ var (
 	deviceCDCACMBufferInvalid32 = leU32(0xFFFFFFFF)
 )
 
-func (acm *deviceCDCACM) init(device *device, config *deviceClassConfig) status {
+func (acm *deviceCDCACM) init(device *device, config *deviceClassConfig, id uint8) status {
 
 	// initialize our associated object references
 	acm.device = device
 	acm.config = config
 
+	// grab references to the global data buffers
+	acm.sendBuffer = &deviceCDCACMDataSendBuffer[device.port]
+	acm.recvBuffer = &deviceCDCACMDataRecvBuffer[device.port]
+
 	// initialize line-coding details from global configuration
-	acm.speed = configDeviceCDCACM[device.port].interfaceSpeed
-	acm.lineCodingSize = configDeviceCDCACM[device.port].lineCodingSize
-	acm.baudRate = configDeviceCDCACM[device.port].lineCodingBaudRate
-	acm.charFormat = configDeviceCDCACM[device.port].lineCodingCharFormat
-	acm.parityType = configDeviceCDCACM[device.port].lineCodingParityType
-	acm.dataBits = configDeviceCDCACM[device.port].lineCodingDataBits
+	acm.speed = configDeviceCDCACM[device.port][id-1].interfaceSpeed
+	acm.lineCodingSize = configDeviceCDCACM[device.port][id-1].lineCodingSize
+	acm.baudRate = configDeviceCDCACM[device.port][id-1].lineCodingBaudRate
+	acm.charFormat = configDeviceCDCACM[device.port][id-1].lineCodingCharFormat
+	acm.parityType = configDeviceCDCACM[device.port][id-1].lineCodingParityType
+	acm.dataBits = configDeviceCDCACM[device.port][id-1].lineCodingDataBits
+
+	lineCoding := deviceCDCACMLineCoding[device.port][id-1]
+	lineCoding[0] = uint8(acm.baudRate >> 0)
+	lineCoding[1] = uint8(acm.baudRate >> 8)
+	lineCoding[2] = uint8(acm.baudRate >> 16)
+	lineCoding[3] = uint8(acm.baudRate >> 24)
+	lineCoding[4] = uint8(acm.charFormat)
+	lineCoding[5] = uint8(acm.parityType)
+	lineCoding[6] = uint8(acm.dataBits)
 
 	// initialize remaining state data
 	acm.alternate = 0xFF
@@ -247,12 +293,12 @@ func (acm *deviceCDCACM) event(event deviceClassEventID, param interface{}) (s s
 		acm.config = nil
 
 	case deviceClassEventSetConfiguration:
-		if configuration, ok := param.(uint8); ok {
+		if id, ok := param.(uint8); ok {
 			// configuration index is 1-based, meaning configuration 0 is invalid
-			if 0 == configuration || int(configuration) > len(acm.device.class.config) {
+			if 0 == id || int(id) > len(acm.device.class.config) {
 				return statusInvalidParameter
 			}
-			if &acm.device.class.config[configuration-1] == acm.config {
+			if &acm.device.class.config[id-1] == acm.config {
 				break // configuration already selected
 			}
 			// de-initialize endpoints of current configuration
@@ -260,7 +306,7 @@ func (acm *deviceCDCACM) event(event deviceClassEventID, param interface{}) (s s
 				break
 			}
 			// select new configuration, reset alternate setting
-			acm.config = &acm.device.class.config[configuration-1]
+			acm.config = &acm.device.class.config[id-1]
 			acm.alternate = 0
 			// initialize endpoints of new configuration
 			if s = acm.initEndpoints(); !s.OK() {
@@ -600,7 +646,9 @@ func (acm *deviceCDCACM) findInterface(classCode uint8) (uint8, *deviceInterface
 	return 0, nil
 }
 
-func (acm *deviceCDCACM) endpointInterface(direction, transferType uint8) (*deviceCDCACMPipe, *deviceInterface) {
+func (acm *deviceCDCACM) endpointInterface(
+	direction, transferType uint8) (*deviceCDCACMPipe, *deviceInterface) {
+
 	switch transferType {
 	case specEndpointInterrupt:
 		switch direction {
@@ -618,7 +666,9 @@ func (acm *deviceCDCACM) endpointInterface(direction, transferType uint8) (*devi
 	return nil, nil
 }
 
-func (acm *deviceCDCACM) controlEndpoint(message deviceEndpointControlMessage, param interface{}) status {
+func (acm *deviceCDCACM) controlEndpoint(
+	message deviceEndpointControlMessage, param interface{}) status {
+
 	if pipe, ok := param.(*deviceCDCACMPipe); ok {
 		var event deviceCDCACMEventID
 		switch pipe {
