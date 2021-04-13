@@ -8,7 +8,7 @@
 package machine
 
 import (
-	"machine/usb"
+	"machine/usb2"
 )
 
 // USBCDC is the legacy TinyGo type used to implement USB CDC-ACM device class
@@ -19,14 +19,11 @@ import (
 type USBCDC struct {
 	port uint8
 	buff *RingBuffer
-	desc *usb.ConfigDeviceDescriptor
-	uart usb.UART
+	uart usb2.UART
 }
 
 // Configure the embedded usb.UART with our receiver's settings and the given
 // UART configuration. This provides compatibility with machine.UART.
 func (cdc *USBCDC) Configure(config UARTConfig) {
-	cdc.uart.SetPort(cdc.port)
-	cdc.uart.SetDeviceDescriptor(cdc.desc)
-	cdc.uart.Configure(usb.UARTConfig{BaudRate: config.BaudRate})
+	cdc.uart.Configure(usb2.UARTConfig{BaudRate: config.BaudRate})
 }

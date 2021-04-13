@@ -4,7 +4,6 @@ package machine
 
 import (
 	"device/nxp"
-	"machine/usb"
 	"runtime/interrupt"
 )
 
@@ -109,13 +108,6 @@ var (
 	USBCDC0 = USBCDC{
 		port: 0, // USB_OTG1 (Micro-B port on Teensy 4.0)
 		buff: NewRingBuffer(),
-		desc: &usb.ConfigDeviceDescriptor{
-			Manufacturer: "PJRC",
-			Product:      "Teensy 4.0 USB CDC-ACM (TinyGo UART0)",
-			VID:          0x16C0, // PJRC
-			PID:          0x0483, // Teensy
-			BCD:          0x0279, // 4.0
-		},
 	}
 )
 
