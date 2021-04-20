@@ -6,6 +6,7 @@ import (
 
 var (
 	ErrInvalidPort = errors.New("invalid USB port")
+	ErrInvalidCore = errors.New("invalid USB core")
 )
 
 type (
@@ -34,4 +35,13 @@ func (uart *UART) Configure(config UARTConfig) error {
 		return ErrInvalidPort
 	}
 	return nil
+}
+
+// Write data to the UART.
+func (uart *UART) Write(data []byte) (n int, err error) {
+	dc, ok := uart.core.dc.(*deviceController)
+	if !ok {
+		return 0, ErrInvalidCore
+	}
+	return dc.uartWrite(data), nil
 }

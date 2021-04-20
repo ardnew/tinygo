@@ -37,8 +37,6 @@ type deviceController struct {
 	stat *dcdEndpoint // endpoint 0 Rx ("out" direction)
 	ctrl *dcdEndpoint // endpoint 0 Tx ("in" direction)
 
-	acm *descCDCACMClass
-
 	timerInterrupt [2]func()
 	controlNotify  uint32
 	endpointNotify uint32
@@ -104,11 +102,6 @@ func initDCD(port int, class class) (dcd, status) {
 						func(interrupt.Interrupt) {
 							//coreInstance[1].dc.interrupt()
 						})
-			}
-			switch class.id {
-			case classDeviceCDCACM:
-				deviceControllerInstance[i].acm = &descCDCACM[class.config-1]
-			default:
 			}
 			return &deviceControllerInstance[i], statusOK
 		}
@@ -445,7 +438,7 @@ func (dc *deviceController) control(setup dcdSetup) {
 					dc.bus.ENDPTCTRL2.Set(descCDCACMConfigAttrStatus) // Status Tx
 					dc.bus.ENDPTCTRL3.Set(descCDCACMConfigAttrDataRx) // Bulk data Rx
 					dc.bus.ENDPTCTRL4.Set(descCDCACMConfigAttrDataTx) // Bulk data Tx
-					dc.serialConfigure()
+					dc.uartConfigure()
 					dc.controlReceive(dcdPointerNil, 0, false)
 
 				default:
@@ -616,9 +609,11 @@ func (dc *deviceController) control(setup dcdSetup) {
 
 					// Control/status interface:
 					case descCDCACMInterfaceCtrl:
-						acm := &descCDCACM[dc.class.config-1]
-						acm.cticks = ticks()
-						acm.rtsdtr = uint8(setup.wValue)
+						// acm := &descCDCACM[dc.class.config-1]
+						// update our emulated UART terminal status
+						// acm.lineActive = ticks()
+						// acm.lineCoding.dtr = 0 != setup.wValue&0x01
+						// acm.lineCoding.rts = 0 != setup.wValue&0x02
 						dc.controlReceive(dcdPointerNil, 0, false)
 						return
 
@@ -699,64 +694,61 @@ func (dc *deviceController) controlDescriptor(setup dcdSetup) {
 
 		// String descriptor
 		case descTypeString:
+			var sd []uint8
+			if 0 == uint8(setup.wValue) {
+				// setup.wIndex contains an arbitrary index referring to a collection of
+				// strings in some given language. This (setup.wValue = 0x03[00]) is a
+				// request from the host to determine what that language is. Subsequent
+				// string requests will populate setup.wIndex with the language code
+				// returned here in this string descriptor.
+				sd = acm.locale[int(setup.wIndex)].descriptor[setup.wValue&0xFF][:]
+			} else {
+				// setup.wIndex now contains a language code, which we notified in a
+				// previous request (above: setup.wValue = 0x03[00]). We need to locate
+				// the set of strings whose language matches the language code given in
+				// this new setup.wIndex.
+				for code := range acm.locale {
+					if setup.wIndex == acm.locale[code].language {
+						// Found language, check if string descriptor at given index exists
+						if int(setup.wValue&0xFF) < len(acm.locale[code].descriptor) {
+							// Found language with a string defined at the requested index.
+							// Construct a string descriptor dynamically to be transmitted on
+							// the serial bus.
 
-			var s []uint8
+							// TODO: Add fields to deviceController and design an API that
+							//       allows the user to define and provide these strings
+							//       prior to deviceController initialization.
+							//       For now, we just always use the descCommon* strings.
+							var s string
+							switch uint8(setup.wValue) {
+							case 1:
+								s = descCommonManufacturer
+							case 2:
+								s = descCommonProduct
+							case 3:
+								s = descCommonSerialNumber
+							}
 
-			// Determine the string index requested
-			switch uint8(setup.wValue) {
-
-			// Language
-			case 0:
-				if int(setup.wIndex) < len(acm.locstr) {
-					s = acm.locstr[setup.wIndex].index[0][:]
-				}
-
-			// Manufacturer
-			case 1:
-				for i := range acm.locstr {
-					if acm.locstr[i].language == setup.wIndex {
-						s = acm.locstr[i].index[1][:]
-						// copy manufacturer string to uint8 buffer as UTF-16
-						for n, c := range descManufacturer {
-							s[2+2*n] = uint8(c)
-							s[3+2*n] = 0
+							// Copy string into string descriptor as UTF-16
+							sd = acm.locale[code].descriptor[int(setup.wValue&0xFF)][:]
+							sd[0] = uint8(2 + 2*len(s))
+							sd[1] = descTypeString
+							for n, c := range s {
+								if 2+2*n >= len(sd) {
+									break
+								}
+								sd[2+2*n] = uint8(c)
+								sd[3+2*n] = 0
+							}
+							break // end search for matching language code
 						}
-						break
-					}
-				}
-
-			// Product
-			case 2:
-				for i := range acm.locstr {
-					if acm.locstr[i].language == setup.wIndex {
-						s = acm.locstr[i].index[2][:]
-						// copy product string to uint8 buffer as UTF-16
-						for n, c := range descProduct {
-							s[2+2*n] = uint8(c)
-							s[3+2*n] = 0
-						}
-						break
-					}
-				}
-
-			// Serial number
-			case 3:
-				for i := range acm.locstr {
-					if acm.locstr[i].language == setup.wIndex {
-						s = acm.locstr[i].index[3][:]
-						// copy serial number string to uint8 buffer as UTF-16
-						for n, c := range descSerialNumber {
-							s[2+2*n] = uint8(c)
-							s[3+2*n] = 0
-						}
-						break
 					}
 				}
 			}
-
-			if nil != s && len(s) > 0 {
-				dxn = s[0]
-				_ = copy(acm.dx[:], s[:dxn])
+			// Copy string descriptor into descriptor transmit buffer
+			if nil != sd && len(sd) >= 0 {
+				dxn = sd[0]
+				_ = copy(acm.dx[:], sd[:dxn])
 			}
 
 		// Device qualification descriptor
@@ -766,7 +758,10 @@ func (dc *deviceController) controlDescriptor(setup dcdSetup) {
 
 		// Alternate configuration descriptor
 		case descTypeOtherSpeedConfiguration:
+			// TODO
 
+		default:
+			// Unhandled descriptor type
 		}
 
 		if dxn > 0 {
@@ -888,19 +883,15 @@ func (dc *deviceController) controlComplete() {
 
 				// CDC-ACM (single)
 				case classDeviceCDCACM:
+					acm := &descCDCACM[dc.class.config-1]
 
 					// Determine interface destination of the notification
 					switch dc.setup.wIndex {
 
 					// Control/status interface:
 					case descCDCACMInterfaceCtrl:
-
-						_ = copy(descCDCACM[dc.class.config-1].coding[:],
-							// descCDCACM[dc.class.config-1].costat[:descCDCACMCodingSize])
-							descCDCACM[dc.class.config-1].cx[:])
-						var coding descCDCACMLineCoding
-						if coding.parse(descCDCACM[dc.class.config-1].coding[:]) {
-							if 134 == coding.baud {
+						if acm.lineCoding.parse(acm.cx[:]) {
+							if 134 == acm.lineCoding.baud {
 								dc.enableSofInterrupts(true, descCDCACMInterfaceCount)
 								dc.rebootTimer = 80
 							}
@@ -925,46 +916,6 @@ func (dc *deviceController) controlComplete() {
 	default:
 		// Unhandled request type
 	}
-
-	// // determine interface destination of the notification
-	// switch dc.setup.wIndex {
-	// // communication/control interface:
-	// case descCDCACMInterfaceCtrl:
-	// 	// switch on the type and recepient of the request
-	// 	switch dc.setup.bmRequestType &
-	// 		(descRequestTypeTypeMsk | descRequestTypeRecipientMsk) {
-	// 	// interface class request:
-	// 	case descRequestTypeRecipientInterface | descRequestTypeTypeClass:
-	// 		// identify which request was received
-	// 		switch dc.setup.bRequest {
-	// 		// CDC_SET_LINE_CODING:
-	// 		case descCDCRequestSetLineCoding:
-	// 			// respond according to our device class
-	// 			switch dc.class.id {
-	// 			// CDC-ACM (single)
-	// 			case classDeviceCDCACM:
-	// 				_ = copy(descCDCACM[dc.class.config-1].coding[:],
-	// 					// descCDCACM[dc.class.config-1].costat[:descCDCACMCodingSize])
-	// 					descCDCACM[dc.class.config-1].cx[:])
-	// 				var coding descCDCACMLineCoding
-	// 				if coding.parse(descCDCACM[dc.class.config-1].coding[:]) {
-	// 					if 134 == coding.baud {
-	// 						dc.enableSofInterrupts(true, descCDCACMInterfaceCount)
-	// 						dc.rebootTimer = 80
-	// 					}
-	// 				}
-	// 			default:
-	// 				// unhandled device class
-	// 			}
-	// 		default:
-	// 			// unhandled request
-	// 		}
-	// 	default:
-	// 		// unhandled request type or recepient
-	// 	}
-	// default:
-	// 	// unhandled interface
-	// }
 }
 
 // endpointQueueHead returns the queue head for the given endpoint address,
@@ -1144,7 +1095,7 @@ func (dc *deviceController) timerStop(timer int) {
 	}
 }
 
-func (dc *deviceController) serialConfigure() {
+func (dc *deviceController) uartConfigure() {
 	acm := &descCDCACM[dc.class.config-1]
 	switch dc.speed {
 	case descDeviceSpeedHigh:
@@ -1162,22 +1113,33 @@ func (dc *deviceController) serialConfigure() {
 	dc.endpointConfigureTx(descCDCACMEndpointStatus,
 		acm.cxSize, false, nil)
 	dc.endpointConfigureRx(descCDCACMEndpointDataRx,
-		acm.rxSize, false, dc.serialNotify)
+		acm.rxSize, false, dc.uartNotify)
 	dc.endpointConfigureTx(descCDCACMEndpointDataTx,
 		acm.txSize, true, nil)
 	for i := range acm.rd {
-		dc.serialReceive(uint8(i))
+		dc.uartReceive(uint8(i))
 	}
-	dc.timerConfigure(0, 75, dc.serialFlush)
+	dc.timerConfigure(0, descCDCACMTxFlushUs, dc.uartFlush)
 }
 
-func (dc *deviceController) serialNotify(transfer *dcdTransfer) {
+func (dc *deviceController) uartReceive(endpoint uint8) {
+	acm := &descCDCACM[dc.class.config-1]
+	num := uint16(endpoint) & descEndptAddrNumberMsk
+	buf := &acm.rx[num*descCDCACMRxSize]
+	ivm := arm.DisableInterrupts()
+	dc.transferPrepare(&acm.rd[num], buf, acm.rxSize, uint32(endpoint))
+	nxp.DeleteDcache(uintptr(unsafe.Pointer(buf)), uintptr(acm.rxSize))
+	dc.receive(descCDCACMEndpointDataRx, &acm.rd[num])
+	arm.EnableInterrupts(ivm)
+}
+
+func (dc *deviceController) uartNotify(transfer *dcdTransfer) {
 	acm := &descCDCACM[dc.class.config-1]
 	len := acm.rxSize - (uint16(transfer.token>>16) & 0x7FFF)
 	p := transfer.param
 	if 0 == len {
 		// zero-length packet (ZLP)
-		dc.serialReceive(uint8(p))
+		dc.uartReceive(uint8(p))
 	} else {
 		// data packet
 		h := acm.rxHead
@@ -1191,7 +1153,7 @@ func (dc *deviceController) serialNotify(transfer *dcdTransfer) {
 					acm.rx[p*descCDCACMRxSize:uint16(p)*descCDCACMRxSize+len])
 				acm.rxCount[q] = n + len
 				acm.rxFree += len
-				dc.serialReceive(uint8(p))
+				dc.uartReceive(uint8(p))
 				return
 			}
 		}
@@ -1208,18 +1170,63 @@ func (dc *deviceController) serialNotify(transfer *dcdTransfer) {
 	}
 }
 
-func (dc *deviceController) serialReceive(endpoint uint8) {
-	ivm := arm.DisableInterrupts()
-	num := uint16(endpoint) & descEndptAddrNumberMsk
+func (dc *deviceController) uartWrite(data []uint8) int {
 	acm := &descCDCACM[dc.class.config-1]
-	buf := &acm.rx[num*descCDCACMRxSize]
-	dc.transferPrepare(&acm.rd[num], buf, acm.rxSize, uint32(endpoint))
-	nxp.DeleteDcache(uintptr(unsafe.Pointer(buf)), uintptr(acm.rxSize))
-	dc.receive(descCDCACMEndpointDataRx, &acm.rd[num])
-	arm.EnableInterrupts(ivm)
+	sent := 0
+	size := len(data)
+	for size > 0 {
+		xfer := &acm.td[acm.txHead]
+		wait := false
+		when := int64(0)
+		for 0 == acm.txFree {
+			if 0 == xfer.token&0x80 {
+				if 0 != xfer.token&0x68 {
+					// TODO: token contains error, how to handle?
+				}
+				acm.txFree = descCDCACMTxSize
+				acm.txPrev = false
+				break
+			}
+			if !wait {
+				wait = true
+				when = ticks()
+			}
+			if acm.txPrev {
+				return sent
+			}
+			if ticks()-when > descCDCACMTxTimeoutMs {
+				acm.txPrev = true
+				return sent
+			}
+		}
+		buff := acm.tx[(int(acm.txHead)*descCDCACMTxSize)+
+			(descCDCACMTxSize-int(acm.txFree)):]
+		if size > int(acm.txFree) {
+			_ = copy(buff, data[sent:sent+int(acm.txFree)])
+			tx := &acm.tx[int(acm.txHead)*descCDCACMTxSize]
+			dc.transferPrepare(xfer, tx, descCDCACMTxSize, 0)
+			nxp.FlushDeleteDcache(uintptr(unsafe.Pointer(tx)), descCDCACMTxSize)
+			dc.transmit(descCDCACMEndpointDataTx, xfer)
+			acm.txHead += 1
+			if acm.txHead >= descCDCACMTDCount {
+				acm.txHead = 0
+			}
+			size -= int(acm.txFree)
+			sent += int(acm.txFree)
+			acm.txFree = 0
+			dc.timerStop(0)
+		} else {
+			_ = copy(buff, data[:size])
+			acm.txFree -= uint16(size)
+			sent += size
+			size = 0
+			dc.timerOneShot(0)
+		}
+	}
+	return sent
 }
 
-func (dc *deviceController) serialFlush() {
+func (dc *deviceController) uartFlush() {
 	const autoFlushTx = true
 	if !autoFlushTx {
 		return

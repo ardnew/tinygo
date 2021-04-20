@@ -27,3 +27,8 @@ type USBCDC struct {
 func (cdc *USBCDC) Configure(config UARTConfig) {
 	cdc.uart.Configure(usb2.UARTConfig{BaudRate: config.BaudRate})
 }
+
+// Write data to the UART.
+func (cdc USBCDC) Write(data []byte) (n int, err error) {
+	return cdc.uart.Write(data)
+}
