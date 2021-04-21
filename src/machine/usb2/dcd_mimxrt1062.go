@@ -22,10 +22,10 @@ const dcdInterruptPriority = 3
 
 // deviceController implements USB device controller driver (dcd) interface.
 type deviceController struct {
-	core  *core // Parent USB core this instance is attached to
-	port  int   // USB port index
-	class class // USB device class
-	id    int   // deviceControllerInstance index
+	core *core // Parent USB core this instance is attached to
+	port int   // USB port index
+	cc   class // USB device class
+	id   int   // deviceControllerInstance index
 
 	bus *nxp.USB_Type
 	phy *nxp.USBPHY_Type
@@ -82,7 +82,7 @@ func initDCD(port int, class class) (dcd, status) {
 			// Initialize device controller.
 			deviceControllerInstance[i].core = &coreInstance[port]
 			deviceControllerInstance[i].port = port
-			deviceControllerInstance[i].class = class
+			deviceControllerInstance[i].cc = class
 			deviceControllerInstance[i].id = i
 			switch port {
 			case 0:
@@ -108,6 +108,8 @@ func initDCD(port int, class class) (dcd, status) {
 	}
 	return nil, statusBusy // No free device controller instances available.
 }
+
+func (dc *deviceController) class() class { return dc.cc }
 
 func (dc *deviceController) init() status {
 	// reset the controller
@@ -270,7 +272,7 @@ func (dc *deviceController) interrupt() {
 		dc.bus.ENDPTFLUSH.Set(0xFFFFFFFF)
 		// if dc.bus.PORTSC1.HasBits(nxp.USB_PORTSC1_PR) {
 		// }
-		switch dc.class.id {
+		switch dc.cc.id {
 		case classDeviceCDCACM:
 			// TBD: reset CDC-ACM UART?
 		default:
@@ -424,14 +426,14 @@ func (dc *deviceController) control(setup dcdSetup) {
 
 			// SET CONFIGURATION (0x09):
 			case descRequestStandardSetConfiguration:
-				dc.class.config = int(setup.wValue)
-				if 0 == dc.class.config || dc.class.config > dcdCount {
+				dc.cc.config = int(setup.wValue)
+				if 0 == dc.cc.config || dc.cc.config > dcdCount {
 					// Use default if invalid index received
-					dc.class.config = 1
+					dc.cc.config = 1
 				}
 
 				// Respond based on our device class configuration
-				switch dc.class.id {
+				switch dc.cc.id {
 
 				// CDC-ACM (single)
 				case classDeviceCDCACM:
@@ -471,7 +473,7 @@ func (dc *deviceController) control(setup dcdSetup) {
 
 			// GET CONFIGURATION (0x08):
 			case descRequestStandardGetConfiguration:
-				dc.controlReply[0] = uint8(dc.class.config)
+				dc.controlReply[0] = uint8(dc.cc.config)
 				dc.controlTransmit(
 					uintptr(unsafe.Pointer(&dc.controlReply[0])), 1, false)
 				return
@@ -578,7 +580,7 @@ func (dc *deviceController) control(setup dcdSetup) {
 			case descCDCRequestSetLineCoding:
 
 				// Respond based on our device class configuration
-				switch dc.class.id {
+				switch dc.cc.id {
 
 				// CDC-ACM (single)
 				case classDeviceCDCACM:
@@ -586,7 +588,7 @@ func (dc *deviceController) control(setup dcdSetup) {
 					if descCDCACMCodingSize == setup.wLength {
 						dc.setup = setup
 						dc.controlReceive(
-							uintptr(unsafe.Pointer(&descCDCACM[dc.class.config-1].cx[0])),
+							uintptr(unsafe.Pointer(&descCDCACM[dc.cc.config-1].cx[0])),
 							descCDCACMCodingSize, true)
 						return
 					}
@@ -599,7 +601,7 @@ func (dc *deviceController) control(setup dcdSetup) {
 			case descCDCRequestSetControlLineState:
 
 				// Respond based on our device class configuration
-				switch dc.class.id {
+				switch dc.cc.id {
 
 				// CDC-ACM (single)
 				case classDeviceCDCACM:
@@ -609,7 +611,7 @@ func (dc *deviceController) control(setup dcdSetup) {
 
 					// Control/status interface:
 					case descCDCACMInterfaceCtrl:
-						// acm := &descCDCACM[dc.class.config-1]
+						// acm := &descCDCACM[dc.cc.config-1]
 						// update our emulated UART terminal status
 						// acm.lineActive = ticks()
 						// acm.lineCoding.dtr = 0 != setup.wValue&0x01
@@ -629,7 +631,7 @@ func (dc *deviceController) control(setup dcdSetup) {
 			case descCDCRequestSendBreak:
 
 				// Respond based on our device class configuration
-				switch dc.class.id {
+				switch dc.cc.id {
 
 				// CDC-ACM (single)
 				case classDeviceCDCACM:
@@ -661,9 +663,9 @@ func (dc *deviceController) control(setup dcdSetup) {
 //go:inline
 func (dc *deviceController) controlTransfers() (dat, ack *dcdTransfer) {
 	// control endpoint is device class-specific
-	switch dc.class.id {
+	switch dc.cc.id {
 	case classDeviceCDCACM:
-		return descCDCACM[dc.class.config-1].cd, descCDCACM[dc.class.config-1].ad
+		return descCDCACM[dc.cc.config-1].cd, descCDCACM[dc.cc.config-1].ad
 	default:
 		return nil, nil
 	}
@@ -672,11 +674,11 @@ func (dc *deviceController) controlTransfers() (dat, ack *dcdTransfer) {
 func (dc *deviceController) controlDescriptor(setup dcdSetup) {
 
 	// Respond based on our device class configuration
-	switch dc.class.id {
+	switch dc.cc.id {
 
 	// CDC-ACM (single)
 	case classDeviceCDCACM:
-		acm := &descCDCACM[dc.class.config-1]
+		acm := &descCDCACM[dc.cc.config-1]
 		dxn := uint8(0)
 
 		// Determine the type of descriptor being requested
@@ -879,11 +881,11 @@ func (dc *deviceController) controlComplete() {
 			case descCDCRequestSetLineCoding:
 
 				// Respond based on our device class configuration
-				switch dc.class.id {
+				switch dc.cc.id {
 
 				// CDC-ACM (single)
 				case classDeviceCDCACM:
-					acm := &descCDCACM[dc.class.config-1]
+					acm := &descCDCACM[dc.cc.config-1]
 
 					// Determine interface destination of the notification
 					switch dc.setup.wIndex {
@@ -923,9 +925,9 @@ func (dc *deviceController) controlComplete() {
 //go:inline
 func (dc *deviceController) endpointQueueHead(endpoint uint8) *dcdEndpoint {
 	// endpoint queue head is device class-specific
-	switch dc.class.id {
+	switch dc.cc.id {
 	case classDeviceCDCACM:
-		return &descCDCACM[dc.class.config-1].qh[endpointIndex(endpoint)]
+		return &descCDCACM[dc.cc.config-1].qh[endpointIndex(endpoint)]
 	default:
 		return nil
 	}
@@ -1096,7 +1098,7 @@ func (dc *deviceController) timerStop(timer int) {
 }
 
 func (dc *deviceController) uartConfigure() {
-	acm := &descCDCACM[dc.class.config-1]
+	acm := &descCDCACM[dc.cc.config-1]
 	switch dc.speed {
 	case descDeviceSpeedHigh:
 		acm.rxSize = descCDCACMDataRxHSPacketSize
@@ -1119,22 +1121,22 @@ func (dc *deviceController) uartConfigure() {
 	for i := range acm.rd {
 		dc.uartReceive(uint8(i))
 	}
-	dc.timerConfigure(0, descCDCACMTxFlushUs, dc.uartFlush)
+	dc.timerConfigure(0, descCDCACMTxSyncUs, dc.uartSync)
 }
 
 func (dc *deviceController) uartReceive(endpoint uint8) {
-	acm := &descCDCACM[dc.class.config-1]
+	acm := &descCDCACM[dc.cc.config-1]
 	num := uint16(endpoint) & descEndptAddrNumberMsk
 	buf := &acm.rx[num*descCDCACMRxSize]
-	ivm := arm.DisableInterrupts()
+	dc.irq.Disable()
 	dc.transferPrepare(&acm.rd[num], buf, acm.rxSize, uint32(endpoint))
 	nxp.DeleteDcache(uintptr(unsafe.Pointer(buf)), uintptr(acm.rxSize))
 	dc.receive(descCDCACMEndpointDataRx, &acm.rd[num])
-	arm.EnableInterrupts(ivm)
+	dc.irq.Enable()
 }
 
 func (dc *deviceController) uartNotify(transfer *dcdTransfer) {
-	acm := &descCDCACM[dc.class.config-1]
+	acm := &descCDCACM[dc.cc.config-1]
 	len := acm.rxSize - (uint16(transfer.token>>16) & 0x7FFF)
 	p := transfer.param
 	if 0 == len {
@@ -1170,8 +1172,88 @@ func (dc *deviceController) uartNotify(transfer *dcdTransfer) {
 	}
 }
 
+// uartFlush discards all buffered input (Rx) data.
+func (dc *deviceController) uartFlush() {
+	acm := &descCDCACM[dc.cc.config-1]
+	tail := acm.rxTail
+	for tail != acm.rxHead {
+		tail += 1
+		if tail > descCDCACMRDCount {
+			tail = 0
+		}
+		i := acm.rxQueue[tail]
+		acm.rxFree -= acm.rxCount[i] - acm.rxIndex[i]
+		dc.uartReceive(uint8(i))
+		acm.rxTail = tail
+	}
+}
+
+func (dc *deviceController) uartAvailable() int {
+	return int(descCDCACM[dc.cc.config-1].rxFree)
+}
+
+func (dc *deviceController) uartPeek() (uint8, bool) {
+	acm := &descCDCACM[dc.cc.config-1]
+	tail := acm.rxTail
+	if tail == acm.rxHead {
+		return 0, false
+	}
+	tail += 1
+	if tail > descCDCACMRDCount {
+		tail = 0
+	}
+	i := acm.rxQueue[tail]
+	return acm.rx[i*descCDCACMRxSize+acm.rxIndex[i]], true
+}
+
+func (dc *deviceController) uartReadByte() (uint8, bool) {
+	b := []uint8{0}
+	ok := dc.uartRead(b) > 0
+	return b[0], ok
+}
+
+func (dc *deviceController) uartRead(data []uint8) int {
+	acm := &descCDCACM[dc.cc.config-1]
+	read := uint16(0)
+	size := uint16(len(data))
+	tail := acm.rxTail
+	dest := uint16(0)
+	dc.irq.Disable()
+	for read < size && tail != acm.rxHead {
+		tail += 1
+		if tail > descCDCACMRDCount {
+			tail = 0
+		}
+		i := acm.rxQueue[tail]
+		count := uint16(size - read)
+		avail := acm.rxCount[i] - acm.rxIndex[i]
+		start := i*descCDCACMRxSize + acm.rxIndex[i]
+		if avail > count {
+			// partially consume packet
+			_ = copy(data[dest:], acm.rx[start:start+count])
+			acm.rxFree -= count
+			acm.rxIndex[i] += count
+			read += count
+		} else {
+			// fully consume packet
+			_ = copy(data[dest:], acm.rx[start:start+avail])
+			dest += avail //* uint16(unsafe.Sizeof(&data[0]))
+			read += avail
+			acm.rxFree -= avail
+			acm.rxTail = tail
+			dc.uartReceive(uint8(i))
+		}
+	}
+	dc.irq.Enable()
+	return int(read)
+}
+
+func (dc *deviceController) uartWriteByte(c uint8) bool {
+	return 1 == dc.uartWrite([]uint8{c})
+}
+
 func (dc *deviceController) uartWrite(data []uint8) int {
-	acm := &descCDCACM[dc.class.config-1]
+	acm := &descCDCACM[dc.cc.config-1]
 	sent := 0
 	size := len(data)
 	for size > 0 {
@@ -1226,12 +1308,12 @@ func (dc *deviceController) uartWrite(data []uint8) int {
 	return sent
 }
 
-func (dc *deviceController) uartFlush() {
+func (dc *deviceController) uartSync() {
 	const autoFlushTx = true
 	if !autoFlushTx {
 		return
 	}
-	acm := &descCDCACM[dc.class.config-1]
+	acm := &descCDCACM[dc.cc.config-1]
 	if 0 == acm.txFree {
 		return
 	}

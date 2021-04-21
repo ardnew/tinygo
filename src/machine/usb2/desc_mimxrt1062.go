@@ -33,7 +33,7 @@ const (
 	descCDCACMMaxPower = 50 // 100 mA
 
 	descCDCACMTxTimeoutMs = 120 // millisec
-	descCDCACMTxFlushUs   = 75  // microsec
+	descCDCACMTxSyncUs    = 75  // microsec
 
 	descCDCACMStatusPacketSize = 16
 	descCDCACMDataRxPacketSize = descCDCACMDataRxHSPacketSize // high-speed
