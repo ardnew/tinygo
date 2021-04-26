@@ -135,6 +135,28 @@ const (
 	descDeviceCapExtAttrBESLPos = 2
 )
 
+const (
+	// Attributes of all endpoint descriptor configurations.
+	descEndptConfigAttr = descConfigAttrD7Msk | // Bit 7: reserved (1)
+		(1 << descConfigAttrSelfPoweredPos) | // Bit 6: self-powered
+		(0 << descConfigAttrRemoteWakeupPos) | // Bit 5: remote wakeup
+		0 // Bits 0-4: reserved (0)
+
+	descEndptConfigAttrRxPos = 0
+	descEndptConfigAttrTxPos = 16
+	descEndptConfigAttrRxMsk = (descEndptConfigAttr | descEndptAttrSyncTypeMsk) << descEndptConfigAttrRxPos
+	descEndptConfigAttrTxMsk = (descEndptConfigAttr | descEndptAttrSyncTypeMsk) << descEndptConfigAttrTxPos
+
+	descEndptConfigAttrRxUnused      = 0x02 << descEndptConfigAttrRxPos
+	descEndptConfigAttrTxUnused      = 0x02 << descEndptConfigAttrTxPos
+	descEndptConfigAttrRxIsochronous = (descEndptAttrSyncTypeAsync | descEndptConfigAttr) << descEndptConfigAttrRxPos
+	descEndptConfigAttrTxIsochronous = (descEndptAttrSyncTypeAsync | descEndptConfigAttr) << descEndptConfigAttrTxPos
+	descEndptConfigAttrRxBulk        = (descEndptAttrSyncTypeAdaptive | descEndptConfigAttr) << descEndptConfigAttrRxPos
+	descEndptConfigAttrTxBulk        = (descEndptAttrSyncTypeAdaptive | descEndptConfigAttr) << descEndptConfigAttrTxPos
+	descEndptConfigAttrRxInterrupt   = (descEndptAttrSyncTypeSync | descEndptConfigAttr) << descEndptConfigAttrRxPos
+	descEndptConfigAttrTxInterrupt   = (descEndptAttrSyncTypeSync | descEndptConfigAttr) << descEndptConfigAttrTxPos
+)
+
 // USB CDC constants defined per specification.
 const (
 
@@ -296,12 +318,9 @@ const (
 	descCDCACMEndpointDataRx = 3 // Bulk data output
 	descCDCACMEndpointDataTx = 4 // Bulk data input
 	// Endpoint configuration attributes for all CDC-ACM configurations.
-	descCDCACMConfigAttrStatus = (descCDCACMConfigAttrUnused << descCDCACMConfigAttrRxPos) |
-		(descCDCACMConfigAttrInterrupt << descCDCACMConfigAttrTxPos)
-	descCDCACMConfigAttrDataRx = (descCDCACMConfigAttrBulk << descCDCACMConfigAttrRxPos) |
-		(descCDCACMConfigAttrUnused << descCDCACMConfigAttrTxPos)
-	descCDCACMConfigAttrDataTx = (descCDCACMConfigAttrUnused << descCDCACMConfigAttrRxPos) |
-		(descCDCACMConfigAttrBulk << descCDCACMConfigAttrTxPos)
+	descCDCACMConfigAttrStatus = descEndptConfigAttrRxUnused | descEndptConfigAttrTxInterrupt
+	descCDCACMConfigAttrDataRx = descEndptConfigAttrRxBulk | descEndptConfigAttrTxUnused
+	descCDCACMConfigAttrDataTx = descEndptConfigAttrRxUnused | descEndptConfigAttrTxBulk
 
 	// Size of all CDC-ACM configuration descriptors.
 	descCDCACMConfigSize = uint16(
@@ -315,18 +334,6 @@ const (
 			descLengthInterface + // data interface
 			descLengthEndpoint + // data input endpoint
 			descLengthEndpoint) // data output endpoint
-	// Attributes of all CDC-ACM configuration descriptors.
-	descCDCACMConfigAttr = descConfigAttrD7Msk | // Bit 7: reserved (1)
-		(1 << descConfigAttrSelfPoweredPos) | // Bit 6: self-powered
-		(0 << descConfigAttrRemoteWakeupPos) | // Bit 5: remote wakeup
-		0 // Bits 0-4: reserved (0)
-
-	descCDCACMConfigAttrRxPos       = 0
-	descCDCACMConfigAttrTxPos       = 16
-	descCDCACMConfigAttrUnused      = 0x02 // TBD: what is this?
-	descCDCACMConfigAttrIsochronous = descCDCACMConfigAttr | descEndptAttrSyncTypeAsync
-	descCDCACMConfigAttrBulk        = descCDCACMConfigAttr | descEndptAttrSyncTypeAdaptive
-	descCDCACMConfigAttrInterrupt   = descCDCACMConfigAttr | descEndptAttrSyncTypeSync
 )
 
 // descCDCACM0Device holds the default device descriptor for CDC-ACM[0], i.e.,
@@ -377,7 +384,7 @@ var descCDCACM0Config = [descCDCACMConfigSize]uint8{
 	descCDCACMInterfaceCount,   // Number of interfaces supported by this configuration
 	1,                          // Value to use to select this configuration (1 = CDC-ACM[0])
 	0,                          // Index of string descriptor describing this configuration
-	descCDCACMConfigAttr,       // Configuration attributes
+	descEndptConfigAttr,        // Configuration attributes
 	descCDCACMMaxPower,         // Max power consumption when fully-operational (2 mA units)
 
 	// Communication/Control Interface Descriptor
@@ -473,6 +480,78 @@ type descCDCACMLineCoding struct {
 	parity   uint8
 	numBits  uint8
 	rtsdtr   uint8
+}
+
+type descCDCACMClass struct {
+	locale *[descCDCACMLanguageCount]descStringLanguage // string descriptors
+	device *[descLengthDevice]uint8                     // device descriptor
+	qualif *[descLengthQualification]uint8              // device qualification descriptor
+	config *[descCDCACMConfigSize]uint8                 // configuration descriptor
+
+	lineCoding *descCDCACMLineCoding // UART line coding active state
+
+	qh *[descCDCACMQHCount]dcdEndpoint // endpoint queue heads
+
+	cd *dcdTransfer                    // control endpoint 0 Rx/Tx data transfer descriptor
+	ad *dcdTransfer                    // control endpoint 0 Rx/Tx ACK transfer descriptor
+	rd *[descCDCACMRDCount]dcdTransfer // bulk data endpoint Rx (OUT) transfer descriptors
+	td *[descCDCACMTDCount]dcdTransfer // bulk data endpoint Tx (IN) transfer descriptors
+
+	cx *[descCDCACMCxCount]uint8    // control endpoint 0 Rx/Tx transfer buffer
+	rx *[descCDCACMRxCount]uint8    // bulk data endpoint Rx (OUT) transfer buffer
+	tx *[descCDCACMTxCount]uint8    // bulk data endpoint Tx (IN) transfer buffer
+	dx *[descCDCACMConfigSize]uint8 // descriptor data Tx (IN) transfer buffer
+
+	cxSize uint16
+	rxSize uint16
+	txSize uint16
+
+	txHead uint8
+	txFree uint16
+	txPrev bool
+
+	rxHead uint8
+	rxTail uint8
+	rxFree uint16
+
+	rxCount *[descCDCACMRDCount]uint16
+	rxIndex *[descCDCACMRDCount]uint16
+	rxQueue *[descCDCACMRDCount + 1]uint16
+}
+
+// descCDCACM holds the configuration, endpoint, and transfer descriptors, along
+// with the buffers and control states, for all of the CDC-ACM (single) device
+// class configurations, ordered by configuration index (offset by -1).
+//go:align 32
+var descCDCACM = [descCDCACMCount]descCDCACMClass{
+	{
+		locale: &descCDCACM0String,
+		device: &descCDCACM0Device,
+		qualif: &descCDCACM0Qualif,
+		config: &descCDCACM0Config,
+
+		lineCoding: &descCDCACM0LineCoding,
+
+		qh: &descCDCACM0QH,
+
+		cd: &descCDCACM0CD,
+		ad: &descCDCACM0AD,
+		rd: &descCDCACM0RD,
+		td: &descCDCACM0TD,
+
+		cx: &descCDCACM0Cx,
+		rx: &descCDCACM0Rx,
+		tx: &descCDCACM0Tx,
+		dx: &descCDCACM0Dx,
+
+		cxSize: descCDCACMStatusPacketSize,
+		rxSize: descCDCACMDataRxPacketSize,
+		txSize: descCDCACMDataTxPacketSize,
+
+		rxCount: &descCDCACM0RDNum,
+		rxIndex: &descCDCACM0RDIdx,
+		rxQueue: &descCDCACM0RDQue,
+	},
 }
 
 const (

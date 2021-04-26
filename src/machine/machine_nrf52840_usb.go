@@ -1,4 +1,4 @@
-// +build nrf52840
+// +build nrf52840,NONE
 
 package machine
 
@@ -339,27 +339,37 @@ func parseUSBSetupRegisters() usbSetup {
 	}
 }
 
+func enableEPOut(ep uint32) {
+	epouten = epouten | (nrf.USBD_EPOUTEN_OUT0 << ep)
+	nrf.USBD.EPOUTEN.Set(epouten)
+}
+
+func enableEPIn(ep uint32) {
+	epinen = epinen | (nrf.USBD_EPINEN_IN0 << ep)
+	nrf.USBD.EPINEN.Set(epinen)
+}
+
 func initEndpoint(ep, config uint32) {
 	switch config {
 	case usb_ENDPOINT_TYPE_INTERRUPT | usbEndpointIn:
-		enableEPIn(ep)
+		nrf.USBD.EPINEN.Set(nrf.USBD_EPINEN_IN0 << ep)
 
 	case usb_ENDPOINT_TYPE_BULK | usbEndpointOut:
 		nrf.USBD.INTENSET.Set(nrf.USBD_INTENSET_ENDEPOUT0 << ep)
 		nrf.USBD.SIZE.EPOUT[ep].Set(0)
-		enableEPOut(ep)
+		nrf.USBD.EPOUTEN.Set(nrf.USBD_EPOUTEN_OUT0 << ep)
 
 	case usb_ENDPOINT_TYPE_INTERRUPT | usbEndpointOut:
 		nrf.USBD.INTENSET.Set(nrf.USBD_INTENSET_ENDEPOUT0 << ep)
 		nrf.USBD.SIZE.EPOUT[ep].Set(0)
-		enableEPOut(ep)
+		nrf.USBD.EPOUTEN.Set(nrf.USBD_EPOUTEN_OUT0 << ep)
 
 	case usb_ENDPOINT_TYPE_BULK | usbEndpointIn:
-		enableEPIn(ep)
+		nrf.USBD.EPINEN.Set(nrf.USBD_EPINEN_IN0 << ep)
 
 	case usb_ENDPOINT_TYPE_CONTROL:
-		enableEPIn(0)
-		enableEPOut(0)
+		nrf.USBD.EPINEN.Set(nrf.USBD_EPINEN_IN0 << ep)
+		nrf.USBD.EPOUTEN.Set(nrf.USBD_EPOUTEN_OUT0 << ep)
 		nrf.USBD.INTENSET.Set(nrf.USBD_INTENSET_ENDEPOUT0)
 		nrf.USBD.TASKS_EP0STATUS.Set(1)
 	}
@@ -519,14 +529,4 @@ func sendViaEPIn(ep uint32, ptr *byte, count int) {
 	)
 	nrf.USBD.EPIN[ep].MAXCNT.Set(uint32(count))
 	nrf.USBD.TASKS_STARTEPIN[ep].Set(1)
-}
-
-func enableEPOut(ep uint32) {
-	epouten = epouten | (nrf.USBD_EPOUTEN_OUT0 << ep)
-	nrf.USBD.EPOUTEN.Set(epouten)
-}
-
-func enableEPIn(ep uint32) {
-	epinen = epinen | (nrf.USBD_EPINEN_IN0 << ep)
-	nrf.USBD.EPINEN.Set(epinen)
 }

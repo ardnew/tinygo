@@ -1,4 +1,4 @@
-// +build sam nrf52840
+// +build sam
 
 package machine
 

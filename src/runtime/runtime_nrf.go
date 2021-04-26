@@ -20,6 +20,7 @@ func postinit() {}
 func main() {
 	systemInit()
 	preinit()
+	machine.Serial.Configure(machine.UARTConfig{})
 	run()
 	abort()
 }
@@ -52,6 +53,7 @@ func initRTC() {
 }
 
 func putchar(c byte) {
+	machine.Serial.WriteByte(c)
 	machine.UART0.WriteByte(c)
 }
 

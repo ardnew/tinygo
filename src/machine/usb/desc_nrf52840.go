@@ -1,18 +1,18 @@
-// +build mimxrt1062
+// +build nrf52840
 
 package usb
 
 // descCPUFrequencyHz defines the target CPU frequency (Hz).
-const descCPUFrequencyHz = 600000000
+const descCPUFrequencyHz = 64000000 // 64 MHz
 
 // General USB device identification constants.
 const (
-	descCommonVendorID  = 0x16C0
-	descCommonProductID = 0x0483
+	descCommonVendorID  = 0x1915
+	descCommonProductID = 0x719E
 	descCommonReleaseID = 0x0101 // BCD (1.1)
 
 	descCommonLanguage     = descLanguageEnglish
-	descCommonManufacturer = "NXP Semiconductors"
+	descCommonManufacturer = "Nordic Semiconductor"
 	descCommonProduct      = "TinyGo USB"
 	descCommonSerialNumber = "1"
 )
@@ -36,39 +36,23 @@ const (
 	descCDCACMTxSyncUs    = 75  // microsec
 
 	descCDCACMStatusPacketSize = 16
-	descCDCACMDataRxPacketSize = descCDCACMDataRxHSPacketSize // high-speed
-	descCDCACMDataTxPacketSize = descCDCACMDataTxHSPacketSize // high-speed
+	descCDCACMDataRxPacketSize = descCDCACMDataRxFSPacketSize // full-speed
+	descCDCACMDataTxPacketSize = descCDCACMDataTxFSPacketSize // full-speed
 	descCDCACMRxSize           = descCDCACMDataRxPacketSize
 	descCDCACMTxSize           = 4 * descCDCACMDataTxPacketSize
 
-	descCDCACMDataRxFSPacketSize = 64  // full-speed
-	descCDCACMDataTxFSPacketSize = 64  // full-speed
-	descCDCACMDataRxHSPacketSize = 512 // high-speed
-	descCDCACMDataTxHSPacketSize = 512 // high-speed
+	// nRF52840 is full-speed (12 Mbit/sec) only
+	descCDCACMDataRxFSPacketSize = 64 // full-speed
+	descCDCACMDataTxFSPacketSize = 64 // full-speed
+	// High-speed (480 Mbit/sec) not supported
+	descCDCACMDataRxHSPacketSize = descCDCACMDataRxFSPacketSize // high-speed
+	descCDCACMDataTxHSPacketSize = descCDCACMDataTxFSPacketSize // high-speed
 )
 
 // descCDCACM0QH is an array of endpoint queue heads, which is where all
 // transfers for a given endpoint are managed, for the default CDC-ACM (single)
 // device class configuration (index 1).
-//
-// From the iMXRT1062 Reference Manual:
-//
-//   Software must ensure that no interface data structure reachable
-//   by the Device Controller spans a 4K-page boundary.
-//
-//   The [queue head] is a 48-byte data structure, but must be aligned on
-//   64-byte boundaries.
-//
-//   Endpoint queue heads are arranged in an array in a continuous area of
-//   memory pointed to by the USB.ENDPOINTLISTADDR pointer. The even-numbered
-//   device queue heads in the list support receive endpoints (OUT/SETUP) and
-//   the odd-numbered queue heads in the list are used for transmit endpoints
-//   (IN/INTERRUPT). The device controller will index into this array based upon
-//   the endpoint number received from the USB bus. All information necessary to
-//   respond to transactions for all primed transfers is contained in this list
-//   so the Device Controller can readily respond to incoming requests without
-//   having to traverse a linked list.
-//go:align 4096
+//go:align 32
 var descCDCACM0QH [descCDCACMQHCount]dcdEndpoint
 
 // descCDCACM0CD is the transfer descriptor for data messages transmitted or

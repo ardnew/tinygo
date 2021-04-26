@@ -1,4 +1,4 @@
-// +build mimxrt1062
+// +build mimxrt1062 nrf52840
 
 package machine
 

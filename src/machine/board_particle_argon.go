@@ -41,7 +41,7 @@ const (
 
 // UART
 var (
-	Serial = &USB
+	Serial = USBCDC{port: 0}
 	UART0  = NRF_UART0
 )
 
