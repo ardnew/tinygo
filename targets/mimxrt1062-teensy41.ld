@@ -1,9 +1,10 @@
 MEMORY
 {
-  ITCM      (rwx): ORIGIN = 0x00000000, LENGTH = 0x00080000 /*  512K */
-  DTCM      (rwx): ORIGIN = 0x20000000, LENGTH = 0x00080000 /*  512K */
-  RAM       (rwx): ORIGIN = 0x20200000, LENGTH = 0x00080000 /*  512K */
-  FLASH      (rx): ORIGIN = 0x60000000, LENGTH = 0x001F0000 /* 1984K */
+  ITCM      (rwx): ORIGIN = 0x00000000, LENGTH = 0x00080000 /*   512K */
+  DTCM      (rwx): ORIGIN = 0x20000000, LENGTH = 0x00080000 /*   512K */
+  RAM       (rwx): ORIGIN = 0x20200000, LENGTH = 0x00080000 /*   512K */
+  FLASH      (rx): ORIGIN = 0x60000000, LENGTH = 0x007C0000 /*  7936K */
+  ERAM      (rwx): ORIGIN = 0x70000000, LENGTH = 0x01000000 /* 16384K */
 }
 
 ENTRY(Reset_Handler);
@@ -87,6 +88,12 @@ SECTIONS
 
     *(.dmabuffer);
     . = ALIGN(32);
+
+  } > RAM
+
+  .bss.extram (NOLOAD) : {
+
+    *(.externalram);
 
   } > RAM
 
