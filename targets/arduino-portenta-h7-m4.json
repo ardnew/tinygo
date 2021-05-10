@@ -1,0 +1,28 @@
+{
+  "inherits": [
+    "cortex-m"
+  ],
+  "llvm-target":
+    "armv7em-none-eabi",
+  "cpu":
+    "cortex-m4",
+  "cflags": [
+    "--target=armv7em-none-eabi",
+    "-mcpu=cortex-m4",
+    "-mfloat-abi=softfp"
+  ],
+  "build-tags": [
+    "portenta_h7",
+    "stm32h7x7_cm4",
+    "stm32h7x7",
+    "stm32h7",
+    "stm32"
+  ],
+  "linkerscript":
+    "targets/arduino-portenta-h7-m4.ld",
+  "extra-files": [
+    "src/device/stm32/stm32h7x7_cm4.s"
+  ],
+  "flash-command":
+    "dfu-util --wait --device=0x2341:0x035B --alt=0 --download={bin} --dfuse-address=0x08100000:leave"
+}
