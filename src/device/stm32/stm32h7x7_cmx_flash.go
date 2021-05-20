@@ -13,10 +13,6 @@ import (
 	"unsafe"
 )
 
-const IRQ_FLASH = 4 // FLASH global Interrupt
-
-//var _ = interrupt.Register(IRQ_FLASH, "FLASH_IRQHandler")
-
 var (
 	FLASH = (*FLASH_Type)(unsafe.Pointer(uintptr(0x52002000)))
 )
@@ -418,3 +414,10 @@ const (
 	FLASH_ECC_FA_FAIL_ECC_ADDR_Msk = 0x7FFF << FLASH_ECC_FA_FAIL_ECC_ADDR_Pos // 0x00007FFF
 	FLASH_ECC_FA_FAIL_ECC_ADDR     = FLASH_ECC_FA_FAIL_ECC_ADDR_Msk           // ECC error address
 )
+
+// SetLatency sets the number of CPU wait states (0-15) for flash accesses.
+func (f *FLASH_Type) SetLatency(latency uint32) {
+	FLASH.ACR.ReplaceBits(latency, FLASH_ACR_LATENCY_Msk, 0)
+	for latency != FLASH.ACR.Get()&FLASH_ACR_LATENCY_Msk {
+	} // block until register reflects requested latency
+}

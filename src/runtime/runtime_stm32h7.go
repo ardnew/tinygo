@@ -22,20 +22,17 @@ func postinit() {}
 //export Reset_Handler
 func main() {
 
-	// disable interrupts
+	// Disable interrupts
 	irq := arm.DisableInterrupts()
 
-	// sync and initialize both cores
-	initSync()
+	// Reset shared bus clocks and initialize RAM, VTOR, and HSEM (for IPC)
+	initSystem()
 
 	// reenable interrupts
 	arm.EnableInterrupts(irq)
 
 	// configure core and peripheral clocks/PLLs/PFDs
 	initClocks()
-
-	// enable GPIO and default peripherals
-	initPeripherals()
 
 	run()
 	abort()

@@ -8,11 +8,12 @@ import (
 	"unsafe"
 )
 
-func preinitCore() {
+func resetCore() {
 
-	// Increasing CPU frequency
-	if stm32.FLASH_LATENCY_DEFAULT > stm32.FLASH.ACR.Get()&stm32.FLASH_ACR_LATENCY_Msk {
-		stm32.FLASH.ACR.ReplaceBits(stm32.FLASH_LATENCY_DEFAULT, stm32.FLASH_ACR_LATENCY_Msk, 0)
+	if stm32.FLASH_LATENCY_DEFAULT >
+		stm32.FLASH.ACR.Get()&stm32.FLASH_ACR_LATENCY_Msk {
+		stm32.FLASH.ACR.ReplaceBits(
+			stm32.FLASH_LATENCY_DEFAULT, stm32.FLASH_ACR_LATENCY_Msk, 0)
 	}
 
 	stm32.RCC.CR.SetBits(stm32.RCC_CR_HSION)
@@ -21,9 +22,10 @@ func preinitCore() {
 		stm32.RCC_CR_CSION | stm32.RCC_CR_RC48ON | stm32.RCC_CR_CSIKERON |
 		stm32.RCC_CR_PLL1ON | stm32.RCC_CR_PLL2ON | stm32.RCC_CR_PLL3ON)
 
-	// Decreasing the number of wait states because of lower CPU frequency
-	if stm32.FLASH_LATENCY_DEFAULT < stm32.FLASH.ACR.Get()&stm32.FLASH_ACR_LATENCY_Msk {
-		stm32.FLASH.ACR.ReplaceBits(stm32.FLASH_LATENCY_DEFAULT, stm32.FLASH_ACR_LATENCY_Msk, 0)
+	if stm32.FLASH_LATENCY_DEFAULT <
+		stm32.FLASH.ACR.Get()&stm32.FLASH_ACR_LATENCY_Msk {
+		stm32.FLASH.ACR.ReplaceBits(
+			stm32.FLASH_LATENCY_DEFAULT, stm32.FLASH_ACR_LATENCY_Msk, 0)
 	}
 
 	stm32.RCC.D1CFGR.Set(0)
@@ -40,6 +42,9 @@ func preinitCore() {
 	stm32.RCC.CR.ClearBits(stm32.RCC_CR_HSEBYP)
 
 	stm32.RCC.CIER.Set(0) // Disable all interrupts
+}
+
+func initCore() {
 
 	// Enable Cortex-M7 HSEM EXTI line (line 78)
 	stm32.EXTI_CORE2.EMR3.SetBits(0x4000)
@@ -73,22 +78,82 @@ func preinitCore() {
 		// Initialize VTOR with vectors in ITCM
 		stm32.SCB.VTOR.Set(uint32(uintptr(unsafe.Pointer(&_svtor))))
 	}
-}
 
-func initCore() {
+	// Disable MPU for now
+	stm32.MPU.Enable(false)
 
-	stm32.MPU.Enable(true)
+	// Enable data/instruction cache
 	stm32.SCB.EnableICache(true)
 	stm32.SCB.EnableDCache(true)
 
+	// Enable hardware semaphore
 	stm32.HSEM.Enable(true)
 
 	//for rccFlagD2CKRDY.get() {
 	//} // Wait until Cortex-M4 enters stop mode
 }
 
-func initCoreClock() {
+func initCoreFreq() uint32 {
 
+	stm32.RCC.D1CFGR.ClearBits(stm32.RCC_D1CFGR_D1CPRE_Msk)
+	stm32.RCC.CFGR.ReplaceBits(stm32.RCC_CFGR_SW_CSI, stm32.RCC_CFGR_SW_Msk, 0)
+	for stm32.RCC.CFGR.Get()&stm32.RCC_CFGR_SWS_Msk != stm32.RCC_CFGR_SWS_CSI {
+	}
+
+	stm32.FLASH.SetLatency(stm32.FLASH_ACR_LATENCY_1WS) // 1 wait states
+
+	stm32.PWR.Configure(
+		stm32.PWR_SMPS_1V8_SUPPLIES_LDO, stm32.PWR_REGULATOR_VOLTAGE_SCALE0)
+
+	for stm32.PWR.PWR_D3CR.Get()&stm32.PWR_PWR_D3CR_VOSRDY != stm32.PWR_PWR_D3CR_VOSRDY {
+	}
+
+	stm32.RCC.CR.SetBits(stm32.RCC_CR_HSEBYP)
+	stm32.RCC.CR.SetBits(stm32.RCC_CR_HSEON)
+
+	for stm32.RCC.CR.Get()&stm32.RCC_CR_HSERDY != stm32.RCC_CR_HSERDY {
+	}
+
+	stm32.RCC.PLLCKSELR.ReplaceBits(
+		stm32.RCC_PLLCKSELR_PLLSRC_HSE, stm32.RCC_PLLCKSELR_PLLSRC_Msk, 0)
+	stm32.RCC.PLLCFGR.SetBits(stm32.RCC_PLLCFGR_DIVP1EN)
+
+	stm32.RCC.PLLCFGR.ReplaceBits(
+		stm32.RCC_PLLCFGR_PLL1RGE_2, stm32.RCC_PLLCFGR_PLL1RGE_Msk, 0)
+	stm32.RCC.PLLCFGR.ReplaceBits(
+		stm32.RCC_PLLCFGR_PLL1VCOSEL_WIDE, stm32.RCC_PLLCFGR_PLL1VCOSEL_Msk, 0)
+
+	// M=1, N=192, P=2, Q=2, R=2
+	stm32.RCC.PLLCKSELR.ReplaceBits(5, stm32.RCC_PLLCKSELR_DIVM1_Msk, 0)
+	stm32.RCC.PLL1DIVR.ReplaceBits(192-1, stm32.RCC_PLL1DIVR_N1_Msk, 0)
+	stm32.RCC.PLL1DIVR.ReplaceBits(2-1, stm32.RCC_PLL1DIVR_P1_Msk, 0)
+	stm32.RCC.PLL1DIVR.ReplaceBits(2-1, stm32.RCC_PLL1DIVR_Q1_Msk, 0)
+	stm32.RCC.PLL1DIVR.ReplaceBits(2-1, stm32.RCC_PLL1DIVR_R1_Msk, 0)
+	stm32.RCC.CR.SetBits(stm32.RCC_CR_PLL1ON)
+
+	for stm32.RCC.CR.Get()&stm32.RCC_CR_PLL1RDY != stm32.RCC_CR_PLL1RDY {
+	}
+
+	stm32.FLASH.SetLatency(stm32.FLASH_ACR_LATENCY_4WS) // 4 wait states
+
+	// (DIV) SYS=1, AHB=2, APB1=2, APB2=2, APB3=2, APB4=2
+	stm32.RCC.D1CFGR.ReplaceBits(
+		stm32.RCC_D1CFGR_HPRE_DIV2, stm32.RCC_D1CFGR_HPRE_Msk, 0)
+	stm32.RCC.CFGR.ReplaceBits(
+		stm32.RCC_CFGR_SW_PLL, stm32.RCC_CFGR_SW_Msk, 0)
+	stm32.RCC.D1CFGR.ReplaceBits(
+		stm32.RCC_D1CFGR_D1CPRE_DIV1, stm32.RCC_D1CFGR_D1CPRE_Msk, 0)
+	stm32.RCC.D1CFGR.ReplaceBits(
+		stm32.RCC_D1CFGR_HPRE_DIV2, stm32.RCC_D1CFGR_HPRE_Msk, 0)
+	stm32.RCC.D2CFGR.ReplaceBits(
+		stm32.RCC_D2CFGR_D2PPRE1_DIV2, stm32.RCC_D2CFGR_D2PPRE1_Msk, 0)
+	stm32.RCC.D2CFGR.ReplaceBits(
+		stm32.RCC_D2CFGR_D2PPRE2_DIV2, stm32.RCC_D2CFGR_D2PPRE2_Msk, 0)
+	stm32.RCC.D1CFGR.ReplaceBits(
+		stm32.RCC_D1CFGR_D1PPRE_DIV2, stm32.RCC_D1CFGR_D1PPRE_Msk, 0)
+	stm32.RCC.D3CFGR.ReplaceBits(
+		stm32.RCC_D3CFGR_D3PPRE_DIV2, stm32.RCC_D3CFGR_D3PPRE_Msk, 0)
+
+	// M7 core runs at the faster SYSCLK frequency (480 MHz)
+	return stm32.RCC.ClockFreq().SYSCLK
 }
-
-func setCoreFreq(freq stm32.RCC_CLOCKS) { _ = freq }

@@ -14,22 +14,52 @@ import (
 )
 
 var (
-	// SYSCFG power control register offset: 0x2C
-	SYSCFG_PWRCR = (*volatile.Register32)(unsafe.Pointer((uintptr(unsafe.Pointer(SYSCFG)) + 0x02C)))
-)
-
-const (
-	SYSCFG_PWRCR_ODEN_Pos = 0
-	SYSCFG_PWRCR_ODEN_Msk = 0x1 << SYSCFG_PWRCR_ODEN_Pos // 0x00000001
-	SYSCFG_PWRCR_ODEN     = SYSCFG_PWRCR_ODEN_Msk        // PWR overdrive enable
-
-)
-
-var (
 	// PWR CPU1 control register offset: 0x10
 	PWR_CPU1CR = (*volatile.Register32)(unsafe.Pointer((uintptr(unsafe.Pointer(PWR)) + 0x010)))
 	// PWR CPU2 control register offset: 0x14
 	PWR_CPU2CR = (*volatile.Register32)(unsafe.Pointer((uintptr(unsafe.Pointer(PWR)) + 0x014)))
+)
+
+var (
+	// SYSCFG power control register offset: 0x2C
+	SYSCFG_PWRCR = (*volatile.Register32)(unsafe.Pointer((uintptr(unsafe.Pointer(SYSCFG)) + 0x02C)))
+)
+
+const PWR_FLAG_SETTING_DELAY = 1000 // 1 second
+
+type PWR_FLAG uint8
+
+const (
+	PWR_FLAG_STOP       PWR_FLAG = 0x01
+	PWR_FLAG_SB_D1      PWR_FLAG = 0x02
+	PWR_FLAG_SB_D2      PWR_FLAG = 0x03
+	PWR_FLAG_SB         PWR_FLAG = 0x04
+	PWR_FLAG_CPU1_HOLD  PWR_FLAG = 0x05
+	PWR_FLAG_CPU2_HOLD  PWR_FLAG = 0x06
+	PWR_FLAG2_STOP      PWR_FLAG = 0x07
+	PWR_FLAG2_SB_D1     PWR_FLAG = 0x08
+	PWR_FLAG2_SB_D2     PWR_FLAG = 0x09
+	PWR_FLAG2_SB        PWR_FLAG = 0x0A
+	PWR_FLAG_PVDO       PWR_FLAG = 0x0B
+	PWR_FLAG_AVDO       PWR_FLAG = 0x0C
+	PWR_FLAG_ACTVOSRDY  PWR_FLAG = 0x0D
+	PWR_FLAG_ACTVOS     PWR_FLAG = 0x0E
+	PWR_FLAG_BRR        PWR_FLAG = 0x0F
+	PWR_FLAG_VOSRDY     PWR_FLAG = 0x10
+	PWR_FLAG_SMPSEXTRDY PWR_FLAG = 0x11
+	PWR_FLAG_MMCVDO     PWR_FLAG = 0x12
+	PWR_FLAG_USB33RDY   PWR_FLAG = 0x13
+	PWR_FLAG_TEMPH      PWR_FLAG = 0x14
+	PWR_FLAG_TEMPL      PWR_FLAG = 0x15
+	PWR_FLAG_VBATH      PWR_FLAG = 0x16
+	PWR_FLAG_VBATL      PWR_FLAG = 0x17
+
+	PWR_FLAG_WKUP1 PWR_FLAG = PWR_PWR_WKUPCR_WKUPC1_Msk
+	PWR_FLAG_WKUP2 PWR_FLAG = PWR_PWR_WKUPCR_WKUPC2_Msk
+	PWR_FLAG_WKUP3 PWR_FLAG = PWR_PWR_WKUPCR_WKUPC3_Msk
+	PWR_FLAG_WKUP4 PWR_FLAG = PWR_PWR_WKUPCR_WKUPC4_Msk
+	PWR_FLAG_WKUP5 PWR_FLAG = PWR_PWR_WKUPCR_WKUPC5_Msk
+	PWR_FLAG_WKUP6 PWR_FLAG = PWR_PWR_WKUPCR_WKUPC6_Msk
 )
 
 const (
@@ -84,98 +114,50 @@ const (
 	PWR_PWR_WKUPCR_WKUPC1     = PWR_PWR_WKUPCR_WKUPC1_Msk        // Clear Wakeup Pin Flag 1
 )
 
-func (pwr *PWR_Type) Configure(supplySource, voltageScale uint32) bool {
+const (
+	SYSCFG_PWRCR_ODEN_Pos = 0
+	SYSCFG_PWRCR_ODEN_Msk = 0x1 << SYSCFG_PWRCR_ODEN_Pos // 0x00000001
+	SYSCFG_PWRCR_ODEN     = SYSCFG_PWRCR_ODEN_Msk        // PWR overdrive enable
+)
 
+func (pwr *PWR_Type) Configure(supplySource, voltageScale uint32) bool {
 	if (PWR_PWR_CR3_SDEN | PWR_PWR_CR3_LDOEN) != (pwr.PWR_CR3.Get() & (PWR_PWR_CR3_SDEN | PWR_PWR_CR3_LDOEN | PWR_PWR_CR3_BYPASS)) {
-		// Check supply configuration
+		// Check current power supply configuration
 		if supplySource != (pwr.PWR_CR3.Get() & PWR_SUPPLY_CONFIG_MASK) {
-			// Supply configuration update locked, can't apply a new supply config
+			// Supply configuration update locked
 			return false
 		} else {
 			// Supply configuration update locked, but new supply configuration
-			// matches old supply configuration; nothing to do.
+			// matches old supply configuration
 			return true
 		}
 	}
-
-	// Set the power supply configuration
+	// Set the new power supply configuration
 	pwr.PWR_CR3.ReplaceBits(supplySource, PWR_SUPPLY_CONFIG_MASK, 0)
-
-	// Wait until voltage level flag is set
-	start := ticks()
 	for !PWR_FLAG_ACTVOSRDY.Get() {
-		if ticks()-start > PWR_FLAG_SETTING_DELAY {
-			return false // timeout
-		}
-	}
-
-	/* When the SMPS supplies external circuits verify that SDEXTRDY flag is set */
+	} // Wait until voltage level flag is set
+	// When SMPS supplies external circuits, wait for SDEXTRDY flag
 	if (supplySource == PWR_SMPS_1V8_SUPPLIES_EXT_AND_LDO) ||
-		(supplySource == PWR_SMPS_2V5_SUPPLIES_EXT_AND_LDO) ||
-		(supplySource == PWR_SMPS_1V8_SUPPLIES_EXT) ||
-		(supplySource == PWR_SMPS_2V5_SUPPLIES_EXT) {
-
-		// Wait till SMPS external supply ready flag is set
-		start = ticks()
-		for !PWR_FLAG_SMPSEXTRDY.Get() {
-			if ticks()-start > PWR_FLAG_SETTING_DELAY {
-				return false // timeout
-			}
-		}
+	    (supplySource == PWR_SMPS_2V5_SUPPLIES_EXT_AND_LDO) ||
+	    (supplySource == PWR_SMPS_1V8_SUPPLIES_EXT) ||
+	    (supplySource == PWR_SMPS_2V5_SUPPLIES_EXT) {
+	    for !PWR_FLAG_SMPSEXTRDY.Get() {
+	    }
 	}
-
 	switch voltageScale {
 	case PWR_REGULATOR_VOLTAGE_SCALE0:
-		// Configure the voltage scaling 1
+		// Use voltage scaling 1
 		pwr.PWR_D3CR.ReplaceBits(PWR_REGULATOR_VOLTAGE_SCALE1, PWR_PWR_D3CR_VOS_Msk, 0)
-		// Enable the PWR overdrive
+		// Enable PWR overdrive
 		SYSCFG_PWRCR.SetBits(SYSCFG_PWRCR_ODEN)
 	default:
-		// Disable the PWR overdrive
+		// Disable PWR overdrive
 		SYSCFG_PWRCR.ClearBits(SYSCFG_PWRCR_ODEN)
-		// Configure the voltage scaling x
+		// Use given voltage scaling
 		pwr.PWR_D3CR.ReplaceBits(voltageScale, PWR_PWR_D3CR_VOS_Msk, 0)
 	}
-
 	return true
 }
-
-type PWR_FLAG uint8
-
-const (
-	PWR_FLAG_STOP       PWR_FLAG = 0x01
-	PWR_FLAG_SB_D1      PWR_FLAG = 0x02
-	PWR_FLAG_SB_D2      PWR_FLAG = 0x03
-	PWR_FLAG_SB         PWR_FLAG = 0x04
-	PWR_FLAG_CPU1_HOLD  PWR_FLAG = 0x05
-	PWR_FLAG_CPU2_HOLD  PWR_FLAG = 0x06
-	PWR_FLAG2_STOP      PWR_FLAG = 0x07
-	PWR_FLAG2_SB_D1     PWR_FLAG = 0x08
-	PWR_FLAG2_SB_D2     PWR_FLAG = 0x09
-	PWR_FLAG2_SB        PWR_FLAG = 0x0A
-	PWR_FLAG_PVDO       PWR_FLAG = 0x0B
-	PWR_FLAG_AVDO       PWR_FLAG = 0x0C
-	PWR_FLAG_ACTVOSRDY  PWR_FLAG = 0x0D
-	PWR_FLAG_ACTVOS     PWR_FLAG = 0x0E
-	PWR_FLAG_BRR        PWR_FLAG = 0x0F
-	PWR_FLAG_VOSRDY     PWR_FLAG = 0x10
-	PWR_FLAG_SMPSEXTRDY PWR_FLAG = 0x11
-	PWR_FLAG_MMCVDO     PWR_FLAG = 0x12
-	PWR_FLAG_USB33RDY   PWR_FLAG = 0x13
-	PWR_FLAG_TEMPH      PWR_FLAG = 0x14
-	PWR_FLAG_TEMPL      PWR_FLAG = 0x15
-	PWR_FLAG_VBATH      PWR_FLAG = 0x16
-	PWR_FLAG_VBATL      PWR_FLAG = 0x17
-
-	PWR_FLAG_WKUP1 PWR_FLAG = PWR_PWR_WKUPCR_WKUPC1_Msk
-	PWR_FLAG_WKUP2 PWR_FLAG = PWR_PWR_WKUPCR_WKUPC2_Msk
-	PWR_FLAG_WKUP3 PWR_FLAG = PWR_PWR_WKUPCR_WKUPC3_Msk
-	PWR_FLAG_WKUP4 PWR_FLAG = PWR_PWR_WKUPCR_WKUPC4_Msk
-	PWR_FLAG_WKUP5 PWR_FLAG = PWR_PWR_WKUPCR_WKUPC5_Msk
-	PWR_FLAG_WKUP6 PWR_FLAG = PWR_PWR_WKUPCR_WKUPC6_Msk
-)
-
-const PWR_FLAG_SETTING_DELAY = 1000 // 1 second
 
 func (f PWR_FLAG) Get() bool {
 	switch f {
