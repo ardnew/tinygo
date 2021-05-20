@@ -9,7 +9,7 @@ const asyncScheduler = false
 type timeUnit int64
 
 //go:extern _svectors
-var _svectors [0]uint8 // vectors location in flash
+var _svectors [0]uint8
 
 //go:extern _evectors
 var _evectors [0]uint8
@@ -23,19 +23,19 @@ func postinit() {}
 func main() {
 
 	// disable interrupts
-	// irq := arm.DisableInterrupts()
+	irq := arm.DisableInterrupts()
 
 	// sync and initialize both cores
 	initSync()
 
+	// reenable interrupts
+	arm.EnableInterrupts(irq)
+
 	// configure core and peripheral clocks/PLLs/PFDs
 	initClocks()
 
-	// enable SysTick, GPIO, and peripherals
+	// enable GPIO and default peripherals
 	initPeripherals()
-
-	// reenable interrupts
-	// arm.EnableInterrupts(irq)
 
 	run()
 	abort()

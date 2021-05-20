@@ -1,15 +1,6 @@
 {
   "inherits": [
-    "cortex-m"
-  ],
-  "llvm-target":
-    "armv7em-none-eabi",
-  "cpu":
-    "cortex-m7",
-  "cflags": [
-    "--target=armv7em-none-eabi",
-    "-mcpu=cortex-m7",
-    "-mfloat-abi=softfp"
+    "cortex-m7"
   ],
   "build-tags": [
     "portenta_h7",
@@ -19,7 +10,7 @@
     "stm32"
   ],
   "linkerscript":
-    "targets/arduino-portenta-h7-m7.ld",
+    "targets/stm32h7x7-cm7.ld",
   "extra-files": [
     "src/device/stm32/stm32h7x7_cm7.s"
   ],

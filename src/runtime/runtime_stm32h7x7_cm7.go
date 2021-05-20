@@ -44,8 +44,8 @@ func preinitCore() {
 	// Enable Cortex-M7 HSEM EXTI line (line 78)
 	stm32.EXTI_CORE2.EMR3.SetBits(0x4000)
 
-	// Check if STM32H7 RevY
-	if (stm32.DBGMCU.IDCODE.Get() & stm32.DBGMCU_IDCODE_REV_ID_Msk) < 0x20000000 {
+	// Check if STM32H7 revision prior to revision B
+	if stm32.DBG.MCURevision() < stm32.DBG_MCU_REVISION_B {
 		// Change the switch matrix read issuing capability to 1 for the AXI SRAM
 		// target (Target 7)
 		((*volatile.Register32)(unsafe.Pointer(uintptr(0x51008108)))).Set(1)
@@ -57,7 +57,7 @@ func preinitCore() {
 	// cannot use it!
 	stm32.FMC.FMC_BCR1.Set(0x000030D2)
 
-	if true {
+	if false {
 		// Initialize VTOR with vectors in flash
 		src := unsafe.Pointer(&_svectors)
 		stm32.SCB.VTOR.Set(uint32(uintptr(src)))
@@ -77,15 +77,18 @@ func preinitCore() {
 
 func initCore() {
 
-	initCache()
-	initSemaphore()
+	stm32.MPU.Enable(true)
+	stm32.SCB.EnableICache(true)
+	stm32.SCB.EnableDCache(true)
 
-	for rccFlagD2CKRDY.get() {
-	} // Wait until Cortex-M4 enters stop mode
+	stm32.HSEM.Enable(true)
+
+	//for rccFlagD2CKRDY.get() {
+	//} // Wait until Cortex-M4 enters stop mode
 }
 
 func initCoreClock() {
 
 }
 
-func setCoreFreq(d1, d2 uint32) { coreD1FreqHz, coreD2FreqHz = d1, d2 }
+func setCoreFreq(freq stm32.RCC_CLOCKS) { _ = freq }

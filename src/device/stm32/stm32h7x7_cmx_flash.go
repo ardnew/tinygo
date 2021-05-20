@@ -78,7 +78,6 @@ const (
 	FLASH_NB_32BITWORD_IN_FLASHWORD = 8                     // 256 bits
 	DUAL_BANK                       = 0x1                   // Dual-bank Flash
 
-	/*******************  Bits definition for FLASH_ACR register  **********************/
 	FLASH_ACR_LATENCY_Pos    = 0
 	FLASH_ACR_LATENCY_Msk    = 0xF << FLASH_ACR_LATENCY_Pos // 0x0000000F
 	FLASH_ACR_LATENCY        = FLASH_ACR_LATENCY_Msk        // Read Latency
@@ -104,7 +103,6 @@ const (
 	FLASH_ACR_WRHIGHFREQ_0   = 0x1 << FLASH_ACR_WRHIGHFREQ_Pos // 0x00000010
 	FLASH_ACR_WRHIGHFREQ_1   = 0x2 << FLASH_ACR_WRHIGHFREQ_Pos // 0x00000020
 
-	/*******************  Bits definition for FLASH_CR register  ***********************/
 	FLASH_CR_LOCK_Pos       = 0
 	FLASH_CR_LOCK_Msk       = 0x1 << FLASH_CR_LOCK_Pos // 0x00000001
 	FLASH_CR_LOCK           = FLASH_CR_LOCK_Msk        // Configuration lock bit
@@ -174,7 +172,6 @@ const (
 	FLASH_CR_CRCRDERRIE_Msk = 0x1 << FLASH_CR_CRCRDERRIE_Pos // 0x10000000
 	FLASH_CR_CRCRDERRIE     = FLASH_CR_CRCRDERRIE_Msk        // CRC read error interrupt enable bit
 
-	/*******************  Bits definition for FLASH_SR register  ***********************/
 	FLASH_SR_BSY_Pos      = 0
 	FLASH_SR_BSY_Msk      = 0x1 << FLASH_SR_BSY_Pos // 0x00000001
 	FLASH_SR_BSY          = FLASH_SR_BSY_Msk        // Busy flag
@@ -224,7 +221,6 @@ const (
 	FLASH_SR_CRCRDERR_Msk = 0x1 << FLASH_SR_CRCRDERR_Pos // 0x10000000
 	FLASH_SR_CRCRDERR     = FLASH_SR_CRCRDERR_Msk        // CRC read error flag
 
-	/*******************  Bits definition for FLASH_CCR register  *******************/
 	FLASH_CCR_CLR_EOP_Pos      = 16
 	FLASH_CCR_CLR_EOP_Msk      = 0x1 << FLASH_CCR_CLR_EOP_Pos // 0x00010000
 	FLASH_CCR_CLR_EOP          = FLASH_CCR_CLR_EOP_Msk        // EOP flag clear bit
@@ -262,7 +258,6 @@ const (
 	FLASH_CCR_CLR_CRCRDERR_Msk = 0x1 << FLASH_CCR_CLR_CRCRDERR_Pos // 0x10000000
 	FLASH_CCR_CLR_CRCRDERR     = FLASH_CCR_CLR_CRCRDERR_Msk        // CRCRDERR flag clear bit
 
-	/*******************  Bits definition for FLASH_OPTCR register  *******************/
 	FLASH_OPTCR_OPTLOCK_Pos        = 0
 	FLASH_OPTCR_OPTLOCK_Msk        = 0x1 << FLASH_OPTCR_OPTLOCK_Pos // 0x00000001
 	FLASH_OPTCR_OPTLOCK            = FLASH_OPTCR_OPTLOCK_Msk        // FLASH_OPTCR lock option configuration bit
@@ -279,7 +274,6 @@ const (
 	FLASH_OPTCR_SWAP_BANK_Msk      = 0x1 << FLASH_OPTCR_SWAP_BANK_Pos // 0x80000000
 	FLASH_OPTCR_SWAP_BANK          = FLASH_OPTCR_SWAP_BANK_Msk        // Bank swapping option configuration bit
 
-	/*******************  Bits definition for FLASH_OPTSR register  ***************/
 	FLASH_OPTSR_OPT_BUSY_Pos      = 0
 	FLASH_OPTSR_OPT_BUSY_Msk      = 0x1 << FLASH_OPTSR_OPT_BUSY_Pos // 0x00000001
 	FLASH_OPTSR_OPT_BUSY          = FLASH_OPTSR_OPT_BUSY_Msk        // Option byte change ongoing flag
@@ -339,12 +333,10 @@ const (
 	FLASH_OPTSR_SWAP_BANK_OPT_Msk = 0x1 << FLASH_OPTSR_SWAP_BANK_OPT_Pos // 0x80000000
 	FLASH_OPTSR_SWAP_BANK_OPT     = FLASH_OPTSR_SWAP_BANK_OPT_Msk        // Bank swapping option status bit
 
-	/*******************  Bits definition for FLASH_OPTCCR register  *******************/
 	FLASH_OPTCCR_CLR_OPTCHANGEERR_Pos = 30
 	FLASH_OPTCCR_CLR_OPTCHANGEERR_Msk = 0x1 << FLASH_OPTCCR_CLR_OPTCHANGEERR_Pos // 0x40000000
 	FLASH_OPTCCR_CLR_OPTCHANGEERR     = FLASH_OPTCCR_CLR_OPTCHANGEERR_Msk        // OPTCHANGEERR reset bit
 
-	/*******************  Bits definition for FLASH_PRAR register  *********************/
 	FLASH_PRAR_PROT_AREA_START_Pos = 0
 	FLASH_PRAR_PROT_AREA_START_Msk = 0xFFF << FLASH_PRAR_PROT_AREA_START_Pos // 0x00000FFF
 	FLASH_PRAR_PROT_AREA_START     = FLASH_PRAR_PROT_AREA_START_Msk          // PCROP area start status bits
@@ -355,7 +347,6 @@ const (
 	FLASH_PRAR_DMEP_Msk            = 0x1 << FLASH_PRAR_DMEP_Pos // 0x80000000
 	FLASH_PRAR_DMEP                = FLASH_PRAR_DMEP_Msk        // PCROP protected erase enable option status bit
 
-	/*******************  Bits definition for FLASH_SCAR register  *********************/
 	FLASH_SCAR_SEC_AREA_START_Pos = 0
 	FLASH_SCAR_SEC_AREA_START_Msk = 0xFFF << FLASH_SCAR_SEC_AREA_START_Pos // 0x00000FFF
 	FLASH_SCAR_SEC_AREA_START     = FLASH_SCAR_SEC_AREA_START_Msk          // Secure-only area start status bits
@@ -366,12 +357,10 @@ const (
 	FLASH_SCAR_DMES_Msk           = 0x1 << FLASH_SCAR_DMES_Pos // 0x80000000
 	FLASH_SCAR_DMES               = FLASH_SCAR_DMES_Msk        // Secure access protected erase enable option status bit
 
-	/*******************  Bits definition for FLASH_WPSN register  *********************/
 	FLASH_WPSN_WRPSN_Pos = 0
 	FLASH_WPSN_WRPSN_Msk = 0xFF << FLASH_WPSN_WRPSN_Pos // 0x000000FF
 	FLASH_WPSN_WRPSN     = FLASH_WPSN_WRPSN_Msk         // Sector write protection option status byte
 
-	/*******************  Bits definition for FLASH_BOOT7_CUR register  ****************/
 	FLASH_BOOT7_BCM7_ADD0_Pos = 0
 	FLASH_BOOT7_BCM7_ADD0_Msk = 0xFFFF << FLASH_BOOT7_BCM7_ADD0_Pos // 0x0000FFFF
 	FLASH_BOOT7_BCM7_ADD0     = FLASH_BOOT7_BCM7_ADD0_Msk           // Arm Cortex-M7 boot address 0
@@ -379,7 +368,6 @@ const (
 	FLASH_BOOT7_BCM7_ADD1_Msk = 0xFFFF << FLASH_BOOT7_BCM7_ADD1_Pos // 0xFFFF0000
 	FLASH_BOOT7_BCM7_ADD1     = FLASH_BOOT7_BCM7_ADD1_Msk           // Arm Cortex-M7 boot address 1
 
-	/*******************  Bits definition for FLASH_BOOT4 register  ********************/
 	FLASH_BOOT4_BCM4_ADD0_Pos = 0
 	FLASH_BOOT4_BCM4_ADD0_Msk = 0xFFFF << FLASH_BOOT4_BCM4_ADD0_Pos // 0x0000FFFF
 	FLASH_BOOT4_BCM4_ADD0     = FLASH_BOOT4_BCM4_ADD0_Msk           // Arm Cortex-M4 boot address 0
@@ -387,7 +375,6 @@ const (
 	FLASH_BOOT4_BCM4_ADD1_Msk = 0xFFFF << FLASH_BOOT4_BCM4_ADD1_Pos // 0xFFFF0000
 	FLASH_BOOT4_BCM4_ADD1     = FLASH_BOOT4_BCM4_ADD1_Msk           // Arm Cortex-M4 boot address 1
 
-	/*******************  Bits definition for FLASH_CRCCR register  ********************/
 	FLASH_CRCCR_CRC_SECT_Pos    = 0
 	FLASH_CRCCR_CRC_SECT_Msk    = 0x7 << FLASH_CRCCR_CRC_SECT_Pos // 0x00000007
 	FLASH_CRCCR_CRC_SECT        = FLASH_CRCCR_CRC_SECT_Msk        // CRC sector number
@@ -415,22 +402,18 @@ const (
 	FLASH_CRCCR_ALL_BANK_Msk    = 0x1 << FLASH_CRCCR_ALL_BANK_Pos // 0x00400000
 	FLASH_CRCCR_ALL_BANK        = FLASH_CRCCR_ALL_BANK_Msk        // CRC select bit
 
-	/*******************  Bits definition for FLASH_CRCSADD register  ****************/
 	FLASH_CRCSADD_CRC_START_ADDR_Pos = 0
 	FLASH_CRCSADD_CRC_START_ADDR_Msk = 0xFFFFFFFF << FLASH_CRCSADD_CRC_START_ADDR_Pos // 0xFFFFFFFF
 	FLASH_CRCSADD_CRC_START_ADDR     = FLASH_CRCSADD_CRC_START_ADDR_Msk               // CRC start address
 
-	/*******************  Bits definition for FLASH_CRCEADD register  ****************/
 	FLASH_CRCEADD_CRC_END_ADDR_Pos = 0
 	FLASH_CRCEADD_CRC_END_ADDR_Msk = 0xFFFFFFFF << FLASH_CRCEADD_CRC_END_ADDR_Pos // 0xFFFFFFFF
 	FLASH_CRCEADD_CRC_END_ADDR     = FLASH_CRCEADD_CRC_END_ADDR_Msk               // CRC end address
 
-	/*******************  Bits definition for FLASH_CRCDATA register  ***************/
 	FLASH_CRCDATA_CRC_DATA_Pos = 0
 	FLASH_CRCDATA_CRC_DATA_Msk = 0xFFFFFFFF << FLASH_CRCDATA_CRC_DATA_Pos // 0xFFFFFFFF
 	FLASH_CRCDATA_CRC_DATA     = FLASH_CRCDATA_CRC_DATA_Msk               // CRC result
 
-	/*******************  Bits definition for FLASH_ECC_FA register  *******************/
 	FLASH_ECC_FA_FAIL_ECC_ADDR_Pos = 0
 	FLASH_ECC_FA_FAIL_ECC_ADDR_Msk = 0x7FFF << FLASH_ECC_FA_FAIL_ECC_ADDR_Pos // 0x00007FFF
 	FLASH_ECC_FA_FAIL_ECC_ADDR     = FLASH_ECC_FA_FAIL_ECC_ADDR_Msk           // ECC error address

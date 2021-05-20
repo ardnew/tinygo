@@ -10,11 +10,16 @@ package machine
 //   machine_stm32h7x7_cm7.go - Cortex-M7 core (primary)
 //   machine_stm32h7x7_cm4.go - Cortex-M4 core
 
-func (p Pin) Port() Pin { return (p >> 4) & 0xF } // high 4 bits
-func (p Pin) Bit() Pin  { return p & 0xF }        // low 4 bits
+import (
+	"device/stm32"
+	"runtime/volatile"
+	"unsafe"
+)
+
+const PinsPerPort = 16
 
 const (
-	portA Pin = iota * 16
+	portA Pin = iota * PinsPerPort
 	portB
 	portC
 	portD
@@ -216,19 +221,44 @@ const (
 	PK15 = portK + 15 // 0xAF
 )
 
+func (p Pin) Port() Pin { return PinsPerPort * ((p >> 4) & 0xF) } // high nybble
+func (p Pin) Bit() Pin  { return p & 0xF }                        // low nybble
+
+func (p Pin) Bus() *stm32.GPIO_Type {
+	o := p.Port()
+	switch o {
+	case portA:
+		return stm32.GPIOA
+	case portB:
+		return stm32.GPIOB
+	case portC:
+		return stm32.GPIOC
+	case portD:
+		return stm32.GPIOD
+	case portE:
+		return stm32.GPIOE
+	case portF:
+		return stm32.GPIOF
+	case portG:
+		return stm32.GPIOG
+	case portH:
+		return stm32.GPIOH
+	case portI:
+		return stm32.GPIOI
+	case portJ:
+		return stm32.GPIOJ
+	case portK:
+		return stm32.GPIOK
+	}
+	return nil
+}
+
 type PinMode uint32
 
 // Constant definitions for the most common pin configurations and alternate
-// functions.
+// functions. Each of these PinMode values are valid and supported
+// configurations (if permitted by the intended GPIO pin).
 const (
-	PinFloating  = pinModePupdNoPull
-	PinPullUp    = pinModePupdPullUp
-	PinPullDown  = pinModePupdPullDown
-	PinPushPull  = pinModeOTypePushPull
-	PinOpenDrain = pinModeOTypeOpenDrain
-	PinAltFunc   = pinModeModeAltFunc
-	PinAnalog    = pinModeModeAnalog
-
 	PinInput           = pinModeModeInput | pinModePupdNoPull
 	PinInputAnalog     = pinModeModeInput | pinModeModeAnalog
 	PinOutput          = PinOutputPushPull
@@ -237,17 +267,35 @@ const (
 	PinOutputAnalog    = pinModeModeOutput | pinModeModeAnalog
 )
 
+// Constant definitions for common attributes that can be applied (bitwise-OR)
+// to any PinMode. Of course, not every combination is valid or supported.
+const (
+	PinFloating      = pinModePupdNoPull
+	PinPullUp        = pinModePupdPullUp
+	PinPullDown      = pinModePupdPullDown
+	PinPushPull      = pinModeOTypePushPull
+	PinOpenDrain     = pinModeOTypeOpenDrain
+	PinLowSpeed      = pinModeSpeedLow
+	PinMediumSpeed   = pinModeSpeedMedium
+	PinHighSpeed     = pinModeSpeedHigh
+	PinVeryHighSpeed = pinModeSpeedVeryHigh
+	PinAltFunc       = pinModeModeAltFunc
+	PinAnalog        = pinModeModeAnalog
+)
+
 // Internally we encode pin configuration in type PinMode (32-bit) as follows:
 //
 //    Bits:  1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
-//   Field:  - - - - - - - - - - - - C I H_H_H_H A_A_A_A S_S_S_S P_P O F_F_F
+//   Field:  - - - - - - - - - - - - C I H_H_H_H A_A_A_A - - S_S P_P O - F_F
 //
 //    Bits   Field             Description (GPIO Register)
 //   ------- ----- ------------------------------------------------------
-//   [ 0:2 ]   F   Function (MODER): Input / Output / Alt / Analog
+//   [ 0:1 ]   F   Function (MODER): Input / Output / Alt / Analog
+//   [   2 ]   -   (Reserved)
 //   [   3 ]   O   Output (OTYPER): Push-Pull / Open-Drain
 //   [ 4:5 ]   P   Pull (PUPDR): No-Pull / Pull-Up / Pull-Down
-//   [ 6:9 ]   S   Speed (OSPEEDR)
+//   [ 6:7 ]   S   Speed (OSPEEDR)
+//   [ 8:9 ]   -   (Reserved)
 //   [10:13]   A   Alternate Function (AFRL/AFRH)
 //   [14:17]   H   Channel (Analog/Timer specific)
 //   [   18]   I   Inverted (Analog/Timer specific)
@@ -258,58 +306,103 @@ const (
 // configuration with each of the specified attributes. Of course, not every
 // combination is valid or supported.
 const (
-	pinModeModeMsk     PinMode = 0x07
-	pinModeModePos     PinMode = 0
-	pinModeModeInput   PinMode = 0 << pinModeModePos
-	pinModeModeOutput  PinMode = 1 << pinModeModePos
-	pinModeModeAltFunc PinMode = 2 << pinModeModePos
-	pinModeModeAnalog  PinMode = 3 << pinModeModePos
+	pinModeModePos     PinMode = 0                   //
+	pinModeModeMsk     PinMode = 0x03                //
+	pinModeModeInput   PinMode = 0 << pinModeModePos //
+	pinModeModeOutput  PinMode = 1 << pinModeModePos //
+	pinModeModeAltFunc PinMode = 2 << pinModeModePos // PA13-PA15, PB04, PB03
+	pinModeModeAnalog  PinMode = 3 << pinModeModePos // Default for all others
 
-	pinModeOTypeMsk       PinMode = 0x01
 	pinModeOTypePos       PinMode = 3
+	pinModeOTypeMsk       PinMode = 0x01
 	pinModeOTypePushPull  PinMode = 0 << pinModeOTypePos
 	pinModeOTypeOpenDrain PinMode = 1 << pinModeOTypePos
 
-	pinModePupdMsk      PinMode = 0x03
 	pinModePupdPos      PinMode = 4
+	pinModePupdMsk      PinMode = 0x03
 	pinModePupdNoPull   PinMode = 0 << pinModePupdPos
 	pinModePupdPullUp   PinMode = 1 << pinModePupdPos
 	pinModePupdPullDown PinMode = 2 << pinModePupdPos
 
-	pinModeSpeedMsk PinMode = 0x0F
-	pinModeSpeedPos PinMode = 6
+	pinModeSpeedPos      PinMode = 6                    //
+	pinModeSpeedMsk      PinMode = 0x03                 //
+	pinModeSpeedLow      PinMode = 0 << pinModeSpeedPos // Default for all others
+	pinModeSpeedMedium   PinMode = 1 << pinModeSpeedPos //
+	pinModeSpeedHigh     PinMode = 2 << pinModeSpeedPos //
+	pinModeSpeedVeryHigh PinMode = 3 << pinModeSpeedPos // PA13, PB03
 
-	pinModeAltMsk PinMode = 0x0F
-	pinModeAltPos PinMode = 10
+	pinModeAltFuncPos PinMode = 10
+	pinModeAltFuncMsk PinMode = 0x0F
 
-	pinModeAChanMsk PinMode = 0x1F
 	pinModeAChanPos PinMode = 14
+	pinModeAChanMsk PinMode = 0x0F
 
+	pinModeInvPos      PinMode = 18
 	pinModeInvMsk      PinMode = 0x01
-	pinModeInvPos      PinMode = 19
 	pinModeInvInverted PinMode = 1 << pinModeInvPos
 
+	pinModeACtrlPos     PinMode = 19
 	pinModeACtrlMsk     PinMode = 0x01
-	pinModeACtrlPos     PinMode = 20
 	pinModeACtrlControl PinMode = 1 << pinModeACtrlPos
 )
 
-// func (m PinMode) mode() PinMode  { return (m >> pinModeModePos) & pinModeModeMsk }
-// func (m PinMode) oType() PinMode { return (m >> pinModeOTypePos) & pinModeOTypeMsk }
-// func (m PinMode) pupd() PinMode  { return (m >> pinModePupdPos) & pinModePupdMsk }
-// func (m PinMode) speed() PinMode { return (m >> pinModeSpeedPos) & pinModeSpeedMsk }
-// func (m PinMode) alt() PinMode   { return (m >> pinModeAltPos) & pinModeAltMsk }
-// func (m PinMode) aChan() PinMode { return (m >> pinModeAChanPos) & pinModeAChanMsk }
-// func (m PinMode) inv() PinMode   { return (m >> pinModeInvPos) & pinModeInvMsk }
-// func (m PinMode) aCtrl() PinMode { return (m >> pinModeACtrlPos) & pinModeACtrlMsk }
-
 func (p Pin) Configure(config PinConfig) {
+
+	bus := p.Bus()
+	bit := uint8(p.Bit())
+
+	// ensure the GPIO bus clock is enabled
+	if !stm32.RCC.IsEnabled(unsafe.Pointer(bus)) {
+		for !stm32.RCC.Enable(unsafe.Pointer(bus), true) {
+		} // ... or block until it is
+	}
+
+	switch config.Mode & (pinModeModeMsk << pinModeModePos) {
+	// output or alternate function mode bits set
+	case pinModeModeOutput, pinModeModeAltFunc:
+		// configure output speed
+		speed := uint32((config.Mode >> pinModeSpeedPos) & pinModeSpeedMsk)
+		bus.GPIO_OSPEEDR.ReplaceBits(speed, uint32(pinModeSpeedMsk), 2*bit)
+		// configure output type
+		otype := uint32((config.Mode >> pinModeOTypePos) & pinModeOTypeMsk)
+		bus.GPIO_OTYPER.ReplaceBits(otype, uint32(pinModeOTypeMsk), bit)
+	}
+
+	// configure pull-up/down resistor
+	pupd := uint32((config.Mode >> pinModePupdPos) & pinModePupdMsk)
+	bus.GPIO_PUPDR.ReplaceBits(pupd, uint32(pinModePupdMsk), 2*bit)
+
+	switch config.Mode & (pinModeModeMsk << pinModeModePos) {
+	// alternate function mode bit set
+	case pinModeModeAltFunc:
+		var reg *volatile.Register32
+		var pos uint8
+		if bit < 8 {
+			reg = &bus.GPIO_AFRL // AFRL register used for pins 0-7
+		} else {
+			reg = &bus.GPIO_AFRH // AFRH register used for pins 8-15
+		}
+		altf := uint32((config.Mode >> pinModeAltFuncPos) & pinModeAltFuncMsk)
+		reg.ReplaceBits(altf, uint32(pinModeAltFuncMsk), 4*(pos%8))
+	}
+
+	// configure IO direction mode
+	mode := uint32((config.Mode >> pinModeModePos) & pinModeModeMsk)
+	bus.GPIO_MODER.ReplaceBits(mode, uint32(pinModeModeMsk), 2*bit)
 }
 
-func (p Pin) Set(set bool) {
+func (p Pin) Toggle() {
+	p.Set(!p.Bus().GPIO_ODR.HasBits(1 << p.Bit()))
+}
 
+func (p Pin) Set(high bool) {
+	if high {
+		p.Bus().GPIO_BSRR.Set(1 << p.Bit())
+	} else {
+		p.Bus().GPIO_BSRR.Set(1 << (p.Bit() + 16))
+	}
 }
 
 func (p Pin) Get() bool {
-	return true
+	return p.Bus().GPIO_IDR.HasBits(1 << p.Bit())
 }

@@ -22,7 +22,7 @@ func initCore() {
 	initCache()
 	initSemaphore()
 
-	allocFlash()
+	stm32.RCC_CORE2.AllocFlash(true)
 
 	if !stm32.IsBootM4() {
 		stm32.HSEM_CORE2.IER.SetBits(1 << semStopMode)
@@ -36,10 +36,10 @@ func initCore() {
 		stm32.SCB.SCR.SetBits(stm32.SCB_SCR_SLEEPDEEP_Msk)
 		// __DSB(); __ISB(); __WFE();
 		arm.AsmFull(`
-	dsb 0xF
-	isb 0xF
-	wfe
-`, nil)
+			dsb 0xF
+			isb 0xF
+			wfe
+		`, nil)
 		// CLEAR_BIT(SCB->SCR, SCB_SCR_SLEEPDEEP_Msk);
 		stm32.SCB.SCR.ClearBits(stm32.SCB_SCR_SLEEPDEEP_Msk)
 		// CLEAR_BIT(HSEMx->C2IER, 1 << semStopMode);
@@ -53,15 +53,4 @@ func initCoreClock() {
 
 }
 
-func setCoreFreq(d1, d2 uint32) { coreD1FreqHz, coreD2FreqHz = d2, d2 }
-
-var flashAllocated volatile.Register32
-
-func allocFlash() {
-	stm32.RCC_CORE2.AHB3ENR.SetBits(stm32.RCC_AHB3ENR_FLASHEN)
-	if stm32.RCC_CORE2.AHB3ENR.HasBits(stm32.RCC_AHB3ENR_FLASHEN) {
-		flashAllocated.Set(1)
-	} else {
-		flashAllocated.Set(0)
-	}
-}
+func setCoreFreq(freq stm32.RCC_CLOCKS) { _ = freq }

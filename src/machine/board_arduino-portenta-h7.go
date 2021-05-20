@@ -41,7 +41,7 @@ const (
 )
 
 const (
-	LED  = LEDG
+	LED  = LEDB
 	LEDR = PK05
 	LEDG = PK06
 	LEDB = PK07

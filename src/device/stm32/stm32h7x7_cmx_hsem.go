@@ -1,7 +1,6 @@
 // Hand created file. DO NOT DELETE.
 // Type definitions, fields, and constants associated with the hardware
-// semaphore (HSEM) peripheral (core domain) of the STM32H7x7 family of
-// dual-core MCUs.
+// semaphore (HSEM) peripheral of the STM32H7x7 family of dual-core MCUs.
 // These definitions are applicable to both the Cortex-M7 and Cortex-M4 cores.
 
 // +build stm32
@@ -13,6 +12,28 @@ import (
 	"runtime/volatile"
 	"unsafe"
 )
+
+var hsemEnabled volatile.Register32
+
+func (sem *HSEM_Type) Enable(enable bool) bool {
+	// Enable/disable hardware semaphore (HSEM) peripheral clock
+	if enable {
+		RCC.AHB4ENR.SetBits(RCC_AHB4ENR_HSEMEN)
+	} else {
+		RCC.AHB4ENR.ClearBits(RCC_AHB4ENR_HSEMEN)
+	}
+	// Verify the change was applied
+	if RCC.AHB4ENR.HasBits(RCC_AHB4ENR_HSEMEN) {
+		hsemEnabled.Set(1)
+		return enable
+	}
+	hsemEnabled.Set(0)
+	return !enable
+}
+
+func (sem *HSEM_Type) IsEnabled() bool {
+	return hsemEnabled.Get() != 0
+}
 
 var (
 	HSEM_CORE1 = (*HSEM_CORE_Type)(unsafe.Pointer((uintptr(unsafe.Pointer(HSEM)) + 0x100)))
