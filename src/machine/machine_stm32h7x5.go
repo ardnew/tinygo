@@ -13,12 +13,26 @@ func EnableClock(bus unsafe.Pointer, enable bool) bool {
 	var reg *volatile.Register32
 	var msk uint32
 	switch bus {
-	case unsafe.Pointer(stm32.HSEM):
-		reg, msk = &stm32.RCC.AHB4ENR, stm32.RCC_AHB4ENR_HSEMEN
+
+	// AHB1
 	case unsafe.Pointer(stm32.ART):
 		reg, msk = &stm32.RCC.AHB1ENR, stm32.RCC_AHB1ENR_ARTEN
+	case unsafe.Pointer(stm32.OTG1_HS_DEVICE):
+		reg, msk = &stm32.RCC.AHB1ENR, stm32.RCC_AHB1ENR_USB1OTGEN
+	case unsafe.Pointer(stm32.OTG2_HS_DEVICE):
+		reg, msk = &stm32.RCC.AHB1ENR, stm32.RCC_AHB1ENR_USB2OTGEN
+	case unsafe.Pointer(stm32.OTG1_HS_PWRCLK):
+		reg, msk = &stm32.RCC.AHB1ENR, stm32.RCC_AHB1ENR_USB1ULPIEN
+	case unsafe.Pointer(stm32.OTG2_HS_PWRCLK):
+		reg, msk = &stm32.RCC.AHB1ENR, stm32.RCC_AHB1ENR_USB2ULPIEN
+
+	// APB4
 	case unsafe.Pointer(stm32.SYSCFG):
 		reg, msk = &stm32.RCC.APB4ENR, stm32.RCC_APB4ENR_SYSCFGEN
+
+	// AHB4
+	case unsafe.Pointer(stm32.HSEM):
+		reg, msk = &stm32.RCC.AHB4ENR, stm32.RCC_AHB4ENR_HSEMEN
 	case unsafe.Pointer(stm32.GPIOA):
 		reg, msk = &stm32.RCC.AHB4ENR, stm32.RCC_AHB4ENR_GPIOAEN
 	case unsafe.Pointer(stm32.GPIOB):
