@@ -108,8 +108,8 @@ func main() {
 	//   5. Enable Cortex-M4 clock gate.
 	initClocks()
 
-	// configure GPIO and default peripherals
-	initPeripherals()
+	// configure board support (GPIO and other peripherals)
+	initBoard()
 
 	run()
 	abort()

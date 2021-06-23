@@ -87,6 +87,12 @@ func initCoreClocks() {
 	//   - Core clocks initialization is handled by M7 core.
 }
 
+func initBoard() {
+
+	// Call the board support initialization
+	machine.InitBoard()
+}
+
 // Do not use directly -- call initSysTick instead, which also initializes the
 // DWT cycle counter.
 func initCoreSysTick(clk stm32.RCC_CLK_Type) {

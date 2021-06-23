@@ -114,9 +114,20 @@ func initAccel() {
 
 func initCoreClocks() {
 
-	// First enable SYSCFG clock
-	_ = machine.EnableClock(unsafe.Pointer(stm32.SYSCFG), true)
+	// Select HSI48 as USB clock source
+	stm32.RCC.D2CCIP2R.ReplaceBits(
+		stm32.RCC_D2CCIP2R_USBSEL_HSI48<<stm32.RCC_D2CCIP2R_USBSEL_Pos,
+		stm32.RCC_D2CCIP2R_USBSEL_Msk, 0)
 
+	// Enable USB VBUS detection
+	stm32.PWR.CR3.SetBits(stm32.PWR_CR3_USB33DEN)
+
+	// Enable IO compensation cell
+	stm32.RCC.CR.SetBits(stm32.RCC_CR_CSION)
+	_ = machine.EnableClock(unsafe.Pointer(stm32.SYSCFG), true)
+	stm32.SYSCFG.CCCSR.SetBits(stm32.SYSCFG_CCCSR_EN)
+
+	// Configure low-speed external oscillator 32 K quartz crystal
 	initLowSpeedCrystal(lseDriveLow)
 
 	// initialize SYSCLK (PLL1 with HSE)
@@ -124,14 +135,18 @@ func initCoreClocks() {
 		// re-initialize SysTick with increased frequencies
 		initSysTick(freq)
 	}
+}
 
-	// Turn off the LED enabled by bootloader
-	machine.LEDG.Configure(machine.PinConfig{Mode: machine.PinOutput})
-	machine.LEDG.High()
+func initBoard() {
 
-	stm32.BootM4()
+	// Signal the Cortex-M4 core to boot and wait until its online!
+	// stm32.BootM4()
 	for !stm32.RCC_FLAG_D2CKRDY.Get() {
 	}
+
+	// Call the board support initialization
+	machine.InitBoard()
+
 }
 
 const (
@@ -167,6 +182,7 @@ func initCoreFreq(bypass, lowSpeed bool) (stm32.RCC_CLK_Type, bool) {
 			CLK:    stm32.RCC_CLK_SYSCLK,
 			SYSSrc: stm32.RCC_SYS_SRC_CSI,
 		}
+		// Change clock source and set flash latency to 1 wait states.
 		if !config.Set(1) {
 			return stm32.RCC_CLK_Type{}, false
 		}
@@ -242,8 +258,6 @@ func initCoreFreq(bypass, lowSpeed bool) (stm32.RCC_CLK_Type, bool) {
 	if !config.Set(latency) {
 		return stm32.RCC_CLK_Type{}, false
 	}
-
-	// TODO: enable USB regulator, VBUS detection
 
 	// Return the clock frequencies derived from the active core configuration.
 	return stm32.ClockFreq(), true

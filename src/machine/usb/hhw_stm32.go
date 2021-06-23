@@ -1,12 +1,14 @@
-// +build mimxrt1062
+// +build stm32
 
 package usb
 
-// Implementation of USB host controller driver (hcd) for NXP iMXRT1062.
+// Common definitions for the USB host controller hardware abstraction (hhw) for
+// all STM32 devices.
 
 import (
-	"device/nxp"
+	"device/stm32"
 	"runtime/interrupt"
+	"runtime/volatile"
 )
 
 // hhwInterruptPriority defines the priority for all USB host interrupts.
@@ -16,9 +18,11 @@ const hhwInterruptPriority = 3
 type hhw struct {
 	*hcd // USB host controller driver
 
-	bus *nxp.USB_Type       // USB core register
-	phy *nxp.USBPHY_Type    // USB PHY register
-	irq interrupt.Interrupt // USB IRQ, only a single interrupt on iMXRT1062
+	glo *stm32.USB_GLOBAL_Type // USB global registers
+	dev *stm32.USB_DEVICE_Type // USB device registers
+	pcc *volatile.Register32   // USB PWR/CLKCTL register
+
+	irq interrupt.Interrupt
 
 	speed Speed
 }
@@ -30,18 +34,23 @@ func allocHHW(port, instance int, speed Speed, hc *hcd) *hhw {
 	switch port {
 	case 0:
 		hhwInstance[instance].hcd = hc
-		hhwInstance[instance].bus = nxp.USB1
-		hhwInstance[instance].phy = nxp.USBPHY1
+		hhwInstance[instance].glo = stm32.USB_GLOBAL1
+		hhwInstance[instance].dev = stm32.USB_DEVICE1
+		hhwInstance[instance].pcc = stm32.USB_PCCTRL1
 
 	case 1:
 		hhwInstance[instance].hcd = hc
-		hhwInstance[instance].bus = nxp.USB2
-		hhwInstance[instance].phy = nxp.USBPHY2
+		hhwInstance[instance].glo = stm32.USB_GLOBAL2
+		hhwInstance[instance].dev = stm32.USB_DEVICE2
+		hhwInstance[instance].pcc = stm32.USB_PCCTRL2
 	}
 
-	// Both ports default to high-speed (480 Mbit/sec) on Teensy 4.x
+	// All ports default to full-speed during initialization. An interrupt event
+	// is raised if/when a USB port connect/status change occurs in which the
+	// host signals a different speed is to be used. At that point, this speed
+	// field will be updated accordingly.
 	if 0 == speed {
-		speed = HighSpeed
+		speed = FullSpeed
 	}
 	hhwInstance[instance].speed = speed
 
@@ -50,7 +59,7 @@ func allocHHW(port, instance int, speed Speed, hc *hcd) *hhw {
 
 // init configures the USB port for host mode operation by initializing all
 // endpoint and transfer descriptor data structures, initializing core registers
-// and interrupts, resetting the USB PHY, and enabling power on the bust.
+// and interrupts, resetting the USB PHY, and enabling power on the bus.
 func (h *hhw) init() status {
 
 	return statusOK

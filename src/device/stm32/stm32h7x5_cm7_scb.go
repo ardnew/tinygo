@@ -14,13 +14,17 @@ import (
 )
 
 // SCB registers that were not automatically exported in the target SVD.
+// Note that offsets listed are relative to SCB base address (0xE000ED00).
 var (
-	SCB_SHCSR   = (*volatile.Register32)(unsafe.Pointer((uintptr(unsafe.Pointer(SCB)) + 0x024))) // Offset: 0x024 (R/W)  System Handler Control and State Register
-	SCB_CCSIDR  = (*volatile.Register32)(unsafe.Pointer((uintptr(unsafe.Pointer(SCB)) + 0x080))) // Offset: 0x080 (R/ )  Cache Size ID Register
-	SCB_CSSELR  = (*volatile.Register32)(unsafe.Pointer((uintptr(unsafe.Pointer(SCB)) + 0x084))) // Offset: 0x084 (R/W)  Cache Size Selection Register
-	SCB_ICIALLU = (*volatile.Register32)(unsafe.Pointer((uintptr(unsafe.Pointer(SCB)) + 0x250))) // Offset: 0x250 ( /W)  I-Cache Invalidate All to PoU
-	SCB_DCISW   = (*volatile.Register32)(unsafe.Pointer((uintptr(unsafe.Pointer(SCB)) + 0x260))) // Offset: 0x260 ( /W)  D-Cache Invalidate by Set-way
-	SCB_DCCISW  = (*volatile.Register32)(unsafe.Pointer((uintptr(unsafe.Pointer(SCB)) + 0x274))) // Offset: 0x274 ( /W)  D-Cache Clean and Invalidate by Set-way
+	SCB_SHCSR    = (*volatile.Register32)(unsafe.Pointer((uintptr(unsafe.Pointer(SCB)) + 0x024))) // Offset: 0x024 (R/W)  System Handler Control and State Register
+	SCB_CCSIDR   = (*volatile.Register32)(unsafe.Pointer((uintptr(unsafe.Pointer(SCB)) + 0x080))) // Offset: 0x080 (R/ )  Cache Size ID Register
+	SCB_CSSELR   = (*volatile.Register32)(unsafe.Pointer((uintptr(unsafe.Pointer(SCB)) + 0x084))) // Offset: 0x084 (R/W)  Cache Size Selection Register
+	SCB_ICIALLU  = (*volatile.Register32)(unsafe.Pointer((uintptr(unsafe.Pointer(SCB)) + 0x250))) // Offset: 0x250 ( /W)  I-Cache Invalidate All to PoU
+	SCB_DCISW    = (*volatile.Register32)(unsafe.Pointer((uintptr(unsafe.Pointer(SCB)) + 0x260))) // Offset: 0x260 ( /W)  D-Cache Invalidate by Set-way
+	SCB_DCCISW   = (*volatile.Register32)(unsafe.Pointer((uintptr(unsafe.Pointer(SCB)) + 0x274))) // Offset: 0x274 ( /W)  D-Cache Clean and Invalidate by Set-way
+	SCB_DCIMVAC  = (*volatile.Register32)(unsafe.Pointer((uintptr(unsafe.Pointer(SCB)) + 0x25C))) // Offset: 0x25C ( /W)  Data cache invalidate by address to the Point of Coherency (PoC)
+	SCB_DCCMVAC  = (*volatile.Register32)(unsafe.Pointer((uintptr(unsafe.Pointer(SCB)) + 0x268))) // Offset: 0x268 ( /W)  Data cache clean by address to the PoC
+	SCB_DCCIMVAC = (*volatile.Register32)(unsafe.Pointer((uintptr(unsafe.Pointer(SCB)) + 0x270))) // Offset: 0x270 ( /W)  Data cache clean and invalidate by address to the PoC
 )
 
 func EnableICache(enable bool) {
@@ -56,6 +60,9 @@ func EnableICache(enable bool) {
 	}
 }
 
+// These variables are declared global so that they're not dynamically allocated
+// on the heap at runtime, but they should not be accessed in any way by any
+// routine other than EnableDCache.
 var (
 	scbDcci volatile.Register32
 	scbSets volatile.Register32
@@ -116,6 +123,86 @@ func EnableDCache(enable bool) {
 			isb 0xF
 		`, nil)
 	}
+}
+
+// FlushDCache flushes data from cache to memory
+//
+// Normally FlushDCache is used when metadata written to memory will be used by
+// a DMA or a bus-controller peripheral. Any data in the cache is written to
+// memory. A copy remains in the cache, so this is typically used with special
+// fields you will want to quickly access in the future. For data transmission,
+// use FlushDeleteDCache.
+//go:inline
+func FlushDCache(addr, size uintptr) {
+	location := addr & 0xFFFFFFE0
+	endAddr := addr + size
+	arm.AsmFull(`
+		dsb 0xF
+	`, nil)
+	for {
+		SCB_DCCMVAC.Set(uint32(location))
+		location += 32
+		if location >= endAddr {
+			break
+		}
+	}
+	arm.AsmFull(`
+		dsb 0xF
+		isb 0xF
+	`, nil)
+}
+
+// DeleteDCache deletes data from the cache, without touching memory.
+//
+// Normally DeleteDCache is used before receiving data via DMA or from
+// bus-controller peripherals which write to memory. You want to delete anything
+// the cache may have stored, so your next read is certain to access the
+// physical memory.
+//go:inline
+func DeleteDCache(addr, size uintptr) {
+	location := addr & 0xFFFFFFE0
+	endAddr := addr + size
+	arm.AsmFull(`
+		dsb 0xF
+	`, nil)
+	for {
+		SCB_DCIMVAC.Set(uint32(location))
+		location += 32
+		if location >= endAddr {
+			break
+		}
+	}
+	arm.AsmFull(`
+		dsb 0xF
+		isb 0xF
+	`, nil)
+}
+
+// FlushDeleteDCache flushes data from cache to memory, and delete it from the
+// cache
+//
+// Normally FlushDeleteDCache is used when transmitting data via DMA or
+// bus-controller peripherals which read from memory. You want any cached data
+// written to memory, and then removed from the cache, because you no longer
+// need to access the data after transmission.
+//go:inline
+func FlushDeleteDCache(addr, size uintptr) {
+	location := addr & 0xFFFFFFE0
+	endAddr := addr + size
+	arm.AsmFull(`
+		dsb 0xF
+	`, nil)
+	for {
+		SCB_DCCIMVAC.Set(uint32(location))
+		location += 32
+		if location >= endAddr {
+			break
+		}
+	}
+	arm.AsmFull(`
+		dsb 0xF
+		isb 0xF
+	`, nil)
 }
 
 const (

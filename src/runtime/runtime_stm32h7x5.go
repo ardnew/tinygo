@@ -44,10 +44,6 @@ func initClocks() {
 	initCoreClocks() // Also updates SysTick with new core frequencies
 }
 
-func initPeripherals() {
-
-}
-
 const (
 	tickPriority = 16   // NVIC priority number
 	tickFreqHz   = 1000 // 1 kHz

@@ -288,7 +288,7 @@ const (
 // to any pinMode. Of course, not every combination is valid or supported.
 const (
 	pinFloating      = pinModePupdNoPull
-	pinPullUp        = pinModePupdPullUp
+	pinPullup        = pinModePupdPullUp
 	pinPullDown      = pinModePupdPullDown
 	pinPushPull      = pinModeOTypePushPull
 	pinOpenDrain     = pinModeOTypeOpenDrain
@@ -348,8 +348,11 @@ const (
 	pinModeSpeedHigh     pinMode = 2 << pinModeSpeedPos //
 	pinModeSpeedVeryHigh pinMode = 3 << pinModeSpeedPos // PA13, PB03
 
-	pinModeAltFuncPos pinMode = 10
-	pinModeAltFuncMsk pinMode = 0x0F
+	pinModeAltFuncPos    pinMode = 10                        //
+	pinModeAltFuncMsk    pinMode = 0x0F                      //
+	pinModeAltFuncUSB1HS pinMode = 0x0A << pinModeAltFuncPos // USB1 HS
+	pinModeAltFuncUSB1FS pinMode = 0x0C << pinModeAltFuncPos // USB1 FS
+	pinModeAltFuncUSB2FS pinMode = 0x0A << pinModeAltFuncPos // USB2 is FS-only
 
 	pinModeAChanPos pinMode = 14
 	pinModeAChanMsk pinMode = 0x0F
@@ -369,24 +372,45 @@ const (
 	PinInputFloating
 	PinInputPulldown
 	PinInputPullup
+
+	PinUSB1FSDP   // USB1 full-speed D+/D-
+	PinUSB1FSDM   // ^
+	PinUSB1FSID   // USB1 full-speed OTG ID
+	PinUSB1FSVBUS // USB1 full-speed VBUS
+	PinUSB1HSULPI // USB1 high-speed ULPI interface
+	PinUSB2FSDP   // USB2 full-speed D+/D-
+	PinUSB2FSDM   // ^
 )
 
-// mode translates the receiver PinMode from the machine package's 8-bit
-// definition to our wider 32-bit type pinMode.
+// Configure configures the receiver Pin according to the given PinConfig.
 func (p Pin) Configure(config PinConfig) {
 	switch config.Mode {
+	// Regular bit-bang GPIO
 	case PinOutput:
-		p.mode(pinOutput | pinPushPull | pinFloating)
+		p.setMode(pinOutput | pinPushPull | pinFloating)
 	case PinInput, PinInputFloating:
-		p.mode(pinInput | pinFloating)
+		p.setMode(pinInput | pinFloating)
 	case PinInputPulldown:
-		p.mode(pinInput | pinPullDown)
+		p.setMode(pinInput | pinPullDown)
 	case PinInputPullup:
-		p.mode(pinInput | pinPullUp)
+		p.setMode(pinInput | pinPullup)
+	// USB OTG FS/HS
+	case PinUSB1FSDP, PinUSB1FSDM:
+		p.setMode(pinAltFunc | pinPushPull | pinPullup | pinModeAltFuncUSB1FS)
+	case PinUSB1FSID:
+		p.setMode(pinAltFunc | pinOpenDrain | pinPullup | pinModeAltFuncUSB1FS)
+	case PinUSB1FSVBUS:
+		p.setMode(pinInput)
+	case PinUSB1HSULPI:
+		p.setMode(pinAltFunc | pinPushPull | pinPullup | pinModeAltFuncUSB1HS)
+	case PinUSB2FSDP, PinUSB2FSDM:
+		p.setMode(pinAltFunc | pinPushPull | pinPullup | pinModeAltFuncUSB2FS)
 	}
 }
 
-func (p Pin) mode(mode pinMode) {
+// mode configures the receiver Pin according to the given pinMode and enables
+// the clock gate for the respective GPIO port.
+func (p Pin) setMode(mode pinMode) {
 
 	bus := p.Bus()
 	bit := uint8(p.Bit())
