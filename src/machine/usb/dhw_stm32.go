@@ -86,8 +86,9 @@ func allocDHW(port, instance int, speed Speed, dc *dcd) *dhw {
 
 func runBootloader() {}
 
-// cycleCount uses the ARM debug cycle counter available on iMXRT1062 (enabled
-// in runtime_mimxrt1062_time.go) to return the number of CPU cycles since boot.
+// cycleCount uses the ARM debug cycle counter (DWT) available on ARM CoreSight
+// devices (enabled in runtime_stm32h7x5.go, function initSysTick) to return the
+// number of CPU cycles since boot.
 //go:inline
 func cycleCount() uint32 {
 	return (*volatile.Register32)(unsafe.Pointer(uintptr(0xe0001004))).Get()
@@ -115,13 +116,6 @@ func (d *dhw) init() status {
 	// Configure USB peripheral for device mode operation
 	if st := d.initDevice(); !st.ok() {
 		return st
-	}
-
-	// Device configuration is successful if nothing modified our device state.
-	if dhwStateInit == d.state {
-		// At this point, we transition to the USB-specified "Default" state,
-		// representing an initialized device out of reset.
-		d.state = dhwStateDefault
 	}
 
 	// Initialize USB interrupt priority
@@ -192,12 +186,14 @@ func (d *dhw) initDevice() status {
 
 	udelay(50000) // 50 ms
 
-	// Disable USB pullup/pulldown
-	d.dev.DCTL.SetBits(stm32.USB_DCTL_SDIS)
-
-	// Disable VBUS sensing
-	d.glo.GCCFG.ClearBits(stm32.USB_GCCFG_VBDEN)
-	d.glo.GOTGCTL.SetBits(stm32.USB_GOTGCTL_BVALOEN | stm32.USB_GOTGCTL_BVALOVAL)
+	// Enable/disable VBUS sensing
+	const enableVbusSense = true
+	if enableVbusSense {
+		d.glo.GCCFG.SetBits(stm32.USB_GCCFG_VBDEN)
+	} else {
+		d.glo.GCCFG.ClearBits(stm32.USB_GCCFG_VBDEN)
+		d.glo.GOTGCTL.SetBits(stm32.USB_GOTGCTL_BVALOEN | stm32.USB_GOTGCTL_BVALOVAL)
+	}
 
 	// Restart PHY clock
 	d.pcc.Set(0)
@@ -250,7 +246,7 @@ func (d *dhw) initDevice() status {
 	// Trigger Tx FIFO empty interrupt when FIFO _completely_ empty. The only
 	// other option available is to trigger interrupt when FIFO _half_ empty,
 	// which will probably be useful once DMA support is added.
-	d.glo.GAHBCFG.SetBits(stm32.USB_GAHBCFG_TXFELVL)
+	// d.glo.GAHBCFG.SetBits(stm32.USB_GAHBCFG_TXFELVL)
 
 	d.glo.GINTMSK.Set(0)          // Disable all internal interrupts
 	d.glo.GINTSTS.Set(0xFFFFFFFF) // Clear all internal interrupts
@@ -259,36 +255,36 @@ func (d *dhw) initDevice() status {
 	d.glo.GINTMSK.SetBits(
 		stm32.USB_GINTMSK_WUIM | //                  31: Resume/remote wakeup detected
 			stm32.USB_GINTMSK_SRQIM | //               30: Session request/new session detected
-			stm32.USB_GINTMSK_DISCINT | //             29: Disconnect detected
-			stm32.USB_GINTMSK_CIDSCHGM | //            28: Connector ID status change
-			stm32.USB_GINTMSK_LPMINTM | //             27: Low-power mode
+			// stm32.USB_GINTMSK_DISCINT | //          29: Disconnect detected
+			// stm32.USB_GINTMSK_CIDSCHGM | //         28: Connector ID status change
+			// stm32.USB_GINTMSK_LPMINTM | //          27: Low-power mode
 			// stm32.USB_GINTMSK_PTXFEM |  //          26: Periodic Tx FIFO empty
 			// stm32.USB_GINTMSK_HCIM |  //            25: Host channels
 			// stm32.USB_GINTMSK_PRTIM |  //           24: Host port
-			stm32.USB_GINTMSK_RSTDEM | //              23: Reset detected
-			stm32.USB_GINTMSK_FSUSPM | //              22: Data fetch suspended
-			// stm32.USB_GINTMSK_PXFRM_IISOOXFRM | //  21: Incomplete periodic transfer
-			//                                         21: Incomplete isochronous OUT transfer
-			// stm32.USB_GINTMSK_IISOIXFRM | //        20: Incomplete isochronous IN transfer
+			// stm32.USB_GINTMSK_RSTDEM | //           23: Reset detected
+			// stm32.USB_GINTMSK_FSUSPM | //           22: Data fetch suspended
+			stm32.USB_GINTMSK_PXFRM_IISOOXFRM | //     21: Incomplete periodic transfer,
+			//                                               Incomplete isochronous OUT transfer
+			stm32.USB_GINTMSK_IISOIXFRM | //           20: Incomplete isochronous IN transfer
 			stm32.USB_GINTMSK_OEPINT | //              19: OUT endpoints
 			stm32.USB_GINTMSK_IEPINT | //              18: IN endpoints
-			//                                         17: Reserved
-			//                                         16: Reserved
+			//                                           - ( Reserved )
+			//                                           - ( Reserved )
 			// stm32.USB_GINTMSK_EOPFM | //            15: End of periodic frame
 			// stm32.USB_GINTMSK_ISOODRPM | //         14: Isochronous OUT packet dropped
 			stm32.USB_GINTMSK_ENUMDNEM | //            13: Enumeration done
 			stm32.USB_GINTMSK_USBRST | //              12: USB reset
 			stm32.USB_GINTMSK_USBSUSPM | //            11: USB suspend
-			stm32.USB_GINTMSK_ESUSPM | //              10: Early suspend
-			//                                          9: Reserved
-			//                                          8: Reserved
-			stm32.USB_GINTMSK_GONAKEFFM | //            7: Global OUT NAK effective
-			stm32.USB_GINTMSK_GINAKEFFM | //            6: Global non-periodic IN NAK effective
-			stm32.USB_GINTMSK_NPTXFEM | //              5: Non-periodic Tx FIFO empty
+			// stm32.USB_GINTMSK_ESUSPM | //           10: Early suspend
+			//                                           - ( Reserved )
+			//                                           - ( Reserved )
+			// stm32.USB_GINTMSK_GONAKEFFM | //         7: Global OUT NAK effective
+			// stm32.USB_GINTMSK_GINAKEFFM | //         6: Global non-periodic IN NAK effective
+			// stm32.USB_GINTMSK_NPTXFEM | //           5: Non-periodic Tx FIFO empty
 			stm32.USB_GINTMSK_RXFLVLM | //              4: Rx FIFO non-empty
 			stm32.USB_GINTMSK_SOFM | //                 3: Start-of-frame
-			stm32.USB_GINTMSK_OTGINT | //               2: OTG interrupt
-			stm32.USB_GINTMSK_MMISM, //                 1: Mode mismatch
+			stm32.USB_GINTMSK_OTGINT, //                2: OTG interrupt
+		// stm32.USB_GINTMSK_MMISM //                 1: Mode mismatch
 	)
 
 	return statusOK
@@ -315,30 +311,21 @@ func (d *dhw) resetEndpoints() {
 	// CDC-ACM (single)
 	case classDeviceCDCACM:
 
-		// Device Rx FIFO recommended size (in 32-bit words):
-		//   (5 * number of control endpoints + 8) +
-		//   (largest USB packet used / 4 + 1 for status information) +
-		//   (2 * number of OUT endpoints) + (1 for Global NAK)
-		//
-		// Note: the entire sum is multiplied by 4 to convert from words to bytes
-		const rxSize = 4 *
-			((5*1 + 8) + (descEndptMaxPktSize/4 + 1) + (2 * 2) + (1))
-
 		// Control endpoint 0 (Rx FIFO)
 		d.endpointAlloc(rxEndpoint(descCDCACMEndpointCtrl),
-			descEndptTypeControl, rxSize)
+			descEndptTypeControl, descCDCACMRxFIFOSize, descEndptMaxPktSize)
 		// Control endpoint 0 (Tx FIFO 0)
 		d.endpointAlloc(txEndpoint(descCDCACMEndpointCtrl),
-			descEndptTypeControl, descEndptMaxPktSize)
+			descEndptTypeControl, descCDCACMTxFIFOSize, descEndptMaxPktSize)
 		// Status interrupt endpoint 1 (Tx FIFO 1)
 		d.endpointAlloc(txEndpoint(descCDCACMEndpointStatus),
-			descEndptTypeInterrupt, descCDCACMStatusPacketSize)
+			descEndptTypeInterrupt, descCDCACMTxFIFOSize, descCDCACMStatusPacketSize)
 		// Data Rx bulk endpoint 2 (Rx FIFO)
 		d.endpointAlloc(rxEndpoint(descCDCACMEndpointDataRx),
-			descEndptTypeBulk, descCDCACMDataRxPacketSize)
+			descEndptTypeBulk, descCDCACMTxFIFOSize, descCDCACMDataRxPacketSize)
 		// Data Tx bulk endpoint 3 (Tx FIFO 3)
 		d.endpointAlloc(txEndpoint(descCDCACMEndpointDataTx),
-			descEndptTypeBulk, descCDCACMDataTxPacketSize)
+			descEndptTypeBulk, descCDCACMTxFIFOSize, descCDCACMDataTxPacketSize)
 
 	// HID
 	case classDeviceHID:
@@ -380,12 +367,7 @@ func (d *dhw) enableSOF(enable bool, iface uint8) {
 // interrupt handles the USB hardware interrupt events and notifies the device
 // controller driver using a common "virtual interrupt" code.
 func (d *dhw) interrupt() {
-	d.irq.Disable()
-
-	// Identify all core interrupts we need to handle based on the configured
-	// interrupt mask, and then clear each of their interrupt pending flags.
-	coreStatus := d.glo.GINTSTS.Get() & d.glo.GINTMSK.Get()
-	d.glo.GINTSTS.Set(coreStatus)
+	// d.irq.Disable()
 
 	// Bit 1 MMIS: Mode mismatch interrupt
 	//   The core sets this bit when the application is trying to access:
@@ -397,144 +379,182 @@ func (d *dhw) interrupt() {
 		d.glo.GINTSTS.Set(d.glo.GINTSTS.Get() & stm32.USB_GINTSTS_MMIS)
 	}
 
-	// Bit 4 RXFLVL: Rx FIFO non-empty
-	//   Indicates that there is at least one packet pending to be read from the
-	//   Rx FIFO.
-	if d.glo.GINTSTS.HasBits(stm32.USB_GINTSTS_RXFLVL) {
-		d.glo.GINTMSK.ClearBits(stm32.USB_GINTSTS_RXFLVL)
+	if d.state >= dhwStateDefault {
+		// Bit 4 RXFLVL: Rx FIFO non-empty
+		//   Indicates that there is at least one packet pending to be read from the
+		//   Rx FIFO.
+		if d.glo.GINTSTS.HasBits(stm32.USB_GINTSTS_RXFLVL) {
+			d.glo.GINTMSK.ClearBits(stm32.USB_GINTSTS_RXFLVL)
 
-		// Constant values for the packet status (PKTSTS) field of Rx status read &
-		// pop register (GRXSTSP). Since most of these trigger a distinct interrupt,
-		// we only need to handle the ones that do not.
-		const (
-			statusNAK              = 1 // 0001 - triggers interrupt
-			statusDataReceived     = 2 // 0010
-			statusTransferComplete = 3 // 0011 - triggers interrupt
-			statusSetupComplete    = 4 // 0100 - triggers interrupt
-			statusSetupReceived    = 6 // 0110
-		)
+			// Constant values for the packet status (PKTSTS) field of Rx status read
+			// and pop register (GRXSTSP). Since most of these trigger a distinct
+			// interrupt, we only need to handle the ones that do not.
+			const (
+				statusNAK              = 1 // 0001 - triggers interrupt
+				statusDataReceived     = 2 // 0010
+				statusTransferComplete = 3 // 0011 - triggers interrupt
+				statusSetupComplete    = 4 // 0100 - triggers interrupt
+				statusSetupReceived    = 6 // 0110
+			)
 
-		// Pop top of the Rx FIFO (required to trigger the interrupts above).
-		status := d.glo.GRXSTSP.Get()
-		info := d.endpointInfo(rxEndpoint(uint8(status & stm32.USB_GRXSTSP_EPNUM)))
-		size := (status & stm32.USB_GRXSTSP_BCNT) >> stm32.USB_GRXSTSP_BCNT_Pos
-		// dpid := (status & stm32.USB_GRXSTSP_DPID) >> stm32.USB_GRXSTSP_DPID_Pos
+			// Pop top of the Rx FIFO (required to trigger the interrupts above).
+			status := d.glo.GRXSTSP.Get()
+			info := d.endpointInfo(rxEndpoint(uint8(status & stm32.USB_GRXSTSP_EPNUM)))
+			size := (status & stm32.USB_GRXSTSP_BCNT) >> stm32.USB_GRXSTSP_BCNT_Pos
+			// dpid := (status & stm32.USB_GRXSTSP_DPID) >> stm32.USB_GRXSTSP_DPID_Pos
 
-		switch (status & stm32.USB_GRXSTSP_PKTSTS) >> stm32.USB_GRXSTSP_PKTSTS_Pos {
-		case statusDataReceived:
-			if size > 0 {
-				d.endpointRead(rxEndpoint(0), d.controlBuffer(int(info.count)), size)
-			}
-		case statusSetupReceived:
-			// Read 8 bytes from control endpoint 0 Rx FIFO
-			d.endpointRead(rxEndpoint(0), d.controlBuffer(0), size)
-			d.setup = setupFrom(d.controlBuffer(0))
-		}
-		d.glo.GINTMSK.SetBits(stm32.USB_GINTSTS_RXFLVL)
-	}
-
-	// Bit 19 OEPINT: OUT endpoint interrupt
-	//   The core sets this bit to indicate that an interrupt is pending on one of
-	//   the OUT endpoints of the core (in device mode). The application must read
-	//   the OTG_DAINT register to determine the exact number of the OUT endpoint
-	//   on which the interrupt occurred, and then read the corresponding
-	//   OTG_DOEPINTx register to determine the exact cause of the interrupt. The
-	//   application must clear the appropriate status bit in the corresponding
-	//   OTG_DOEPINTx register to clear this bit.
-	if d.glo.GINTSTS.HasBits(stm32.USB_GINTSTS_OEPINT) {
-		rx := (d.dev.DAINT.Get() & d.dev.DAINTMSK.Get()) >> 16
-		for 0 != rx {
-			num := bits.TrailingZeros32(rx)
-			rx &^= 1 << num
-
-			reg := d.glo.OutEp(num).DOEPINT.Get() & d.dev.DOEPMSK.Get()
-
-			if stm32.USB_DOEPINT_XFRC == reg&stm32.USB_DOEPINT_XFRC {
-				d.glo.OutEp(num).DOEPINT.Set(stm32.USB_DOEPINT_XFRC)
-				// out transfer complete
-				if (0 == num) && (0 == d.endpointInfo(rxEndpoint(0)).len) {
-					d.endpointEnable(0, true, 0)
+			// Determine the USB core status, and respond to ONLY the events which do
+			// not have dedicated interrupts.
+			switch (status & stm32.USB_GRXSTSP_PKTSTS) >> stm32.USB_GRXSTSP_PKTSTS_Pos {
+			// Data received by USB core and placed in Rx FIFO. Call endpointRead to
+			// drain the FIFO and copy its content to application memory (into the
+			// controlBuffer declared by current device class configuration).
+			case statusDataReceived:
+				if size > 0 {
+					d.endpointRead(rxEndpoint(0), d.controlBuffer(int(info.count)), size)
 				}
-				// d.endpointDataOut(rxEndpoint(uint8(num)))
+			// SETUP data received by USB core and placed in Rx FIFO. Call
+			// endpointRead to drain the FIFO and decode it as a dcdSetup structure,
+			// stored in the receiver's d.setup. The data is processed by the generic
+			// event handler (*dcd).event (event ID: dcdEventControlSetup) after the
+			// core raises the OUT endpoint interrupt (OEPINT), and then sets the STUP
+			// bit in the endpoint status register of control endpoint 0.
+			case statusSetupReceived:
+				// Read 8 bytes from control endpoint 0 Rx FIFO
+				d.endpointRead(rxEndpoint(0), d.controlBuffer(0), size)
+				d.setup = setupFrom(d.controlBuffer(0))
 			}
-			if stm32.USB_DOEPINT_STUP == reg&stm32.USB_DOEPINT_STUP {
-				d.glo.OutEp(num).DOEPINT.Set(stm32.USB_DOEPINT_STUP)
-				d.event(dcdEvent{
-					id:    dcdEventControlSetup,
-					setup: d.setup,
-				})
-			}
-			if stm32.USB_DOEPINT_OTEPDIS == reg&stm32.USB_DOEPINT_OTEPDIS {
-				d.glo.OutEp(num).DOEPINT.Set(stm32.USB_DOEPINT_OTEPDIS)
-			}
-			if stm32.USB_DOEPINT_OTEPSPR == reg&stm32.USB_DOEPINT_OTEPSPR {
-				d.glo.OutEp(num).DOEPINT.Set(stm32.USB_DOEPINT_OTEPSPR)
-			}
-			if stm32.USB_DOEPINT_NAK == reg&stm32.USB_DOEPINT_NAK {
-				d.glo.OutEp(num).DOEPINT.Set(stm32.USB_DOEPINT_NAK)
+			d.glo.GINTMSK.SetBits(stm32.USB_GINTSTS_RXFLVL)
+		}
+
+		// Bit 19 OEPINT: OUT endpoint interrupt
+		//   The core sets this bit to indicate that an interrupt is pending on one
+		//   of the OUT endpoints of the core (in device mode). The application must
+		//   read the OTG_DAINT register to determine the exact number of the OUT
+		//   endpoint on which the interrupt occurred, and then read the
+		//   corresponding OTG_DOEPINTx register to determine the exact cause of the
+		//   interrupt. The application must clear the appropriate status bit in the
+		//   corresponding OTG_DOEPINTx register to clear this bit.
+		if d.glo.GINTSTS.HasBits(stm32.USB_GINTSTS_OEPINT) {
+			// Handle each endpoint that has its OUT endpoint interrupt bit set.
+			rx := (d.dev.DAINT.Get() & d.dev.DAINTMSK.Get()) >> 16
+			for 0 != rx {
+				num := bits.TrailingZeros32(rx)
+				rx &^= 1 << num
+				reg := d.glo.OutEp(num).DOEPINT.Get() & d.dev.DOEPMSK.Get()
+
+				// OUT transfer complete
+				if stm32.USB_DOEPINT_XFRC == reg&stm32.USB_DOEPINT_XFRC {
+					d.glo.OutEp(num).DOEPINT.Set(stm32.USB_DOEPINT_XFRC)
+					if 0 == num {
+						if 0 == d.endpointInfo(rxEndpoint(0)).len {
+							d.endpointEnable(0, true, 0)
+						}
+						d.controlComplete()
+					}
+				}
+				// SETUP packet reception complete
+				if stm32.USB_DOEPINT_STUP == reg&stm32.USB_DOEPINT_STUP {
+					d.glo.OutEp(num).DOEPINT.Set(stm32.USB_DOEPINT_STUP)
+					if 0 == num {
+						// Process the SETUP data, which schedules any necessary transmit or
+						// receive transfers that need to occur. It also schedules any ACK
+						// handshaking required by the host in either direction.
+						d.event(dcdEvent{
+							id:    dcdEventControlSetup,
+							setup: d.setup,
+						})
+						d.controlComplete()
+					}
+				}
+				if stm32.USB_DOEPINT_OTEPDIS == reg&stm32.USB_DOEPINT_OTEPDIS {
+					d.glo.OutEp(num).DOEPINT.Set(stm32.USB_DOEPINT_OTEPDIS)
+				}
+				if stm32.USB_DOEPINT_OTEPSPR == reg&stm32.USB_DOEPINT_OTEPSPR {
+					d.glo.OutEp(num).DOEPINT.Set(stm32.USB_DOEPINT_OTEPSPR)
+				}
+				if stm32.USB_DOEPINT_NAK == reg&stm32.USB_DOEPINT_NAK {
+					d.glo.OutEp(num).DOEPINT.Set(stm32.USB_DOEPINT_NAK)
+				}
 			}
 		}
-	}
 
-	// Bit 18 IEPINT: IN endpoint interrupt
-	//   The core sets this bit to indicate that an interrupt is pending on one of
-	//   the IN endpoints of the core (in device mode). The application must read
-	//   the OTG_DAINT register to determine the exact number of the IN endpoint
-	//   on which the interrupt occurred, and then read the corresponding
-	//   OTG_DIEPINTx register to determine the exact cause of the interrupt. The
-	//   application must clear the appropriate status bit in the corresponding
-	//   OTG_DIEPINTx register to clear this bit.
-	if d.glo.GINTSTS.HasBits(stm32.USB_GINTSTS_IEPINT) {
-		tx := (d.dev.DAINT.Get() & d.dev.DAINTMSK.Get()) & 0xFFFF
-		for 0 != tx {
-			num := bits.TrailingZeros32(tx)
-			tx &^= 1 << num
+		// Bit 18 IEPINT: IN endpoint interrupt
+		//   The core sets this bit to indicate that an interrupt is pending on one
+		//   of the IN endpoints of the core (in device mode). The application must
+		//   read the OTG_DAINT register to determine the exact number of the IN
+		//   endpoint on which the interrupt occurred, and then read the
+		//   corresponding OTG_DIEPINTx register to determine the exact cause of the
+		//   interrupt. The application must clear the appropriate status bit in the
+		//   corresponding OTG_DIEPINTx register to clear this bit.
+		if d.glo.GINTSTS.HasBits(stm32.USB_GINTSTS_IEPINT) {
+			// Handle each endpoint that has its OUT endpoint interrupt bit set.
+			tx := (d.dev.DAINT.Get() & d.dev.DAINTMSK.Get()) & 0xFFFF
+			for 0 != tx {
+				num := bits.TrailingZeros32(tx)
+				tx &^= 1 << num
+				reg := d.glo.InEp(num).DIEPINT.Get() & (d.dev.DIEPMSK.Get() |
+					(((d.dev.DIEPEMPMSK.Get() >> (num & descEndptAddrNumberMsk)) & 0x1) <<
+						descEndptAddrDirectionPos))
 
-			reg := d.glo.InEp(num).DIEPINT.Get() & d.dev.DIEPMSK.Get()
-			// (d.dev.DIEPMSK.Get() | (((d.dev.DIEPEMPMSK.Get() >>
-			// 	(num & descEndptAddrNumberMsk)) & 0x1) << 7))
+				// IN transfer complete
+				if stm32.USB_DIEPINT_XFRC == reg&stm32.USB_DIEPINT_XFRC {
+					d.glo.InEp(num).DIEPINT.Set(stm32.USB_DIEPINT_XFRC)
+					d.dev.DIEPEMPMSK.ClearBits(1 << (num & descEndptAddrNumberMsk))
+					if 0 == num {
+						d.controlComplete()
+					}
+				}
+				if stm32.USB_DIEPINT_TOC == reg&stm32.USB_DIEPINT_TOC {
+					d.glo.InEp(num).DIEPINT.Set(stm32.USB_DIEPINT_TOC)
+				}
+				if stm32.USB_DIEPINT_INEPNE == reg&stm32.USB_DIEPINT_INEPNE {
+					d.glo.InEp(num).DIEPINT.Set(stm32.USB_DIEPINT_INEPNE)
+				}
+				if stm32.USB_DIEPINT_EPDISD == reg&stm32.USB_DIEPINT_EPDISD {
+					d.glo.InEp(num).DIEPINT.Set(stm32.USB_DIEPINT_EPDISD)
+				}
+				if stm32.USB_DIEPINT_ITTXFE == reg&stm32.USB_DIEPINT_ITTXFE {
+					d.glo.InEp(num).DIEPINT.Set(stm32.USB_DIEPINT_ITTXFE)
+				}
+				// IN transmit FIFO empty, ready to send any buffered data stored on
+				// this endpoint.
+				if stm32.USB_DIEPINT_TXFE == reg&stm32.USB_DIEPINT_TXFE {
+					// Tx FIFO empty interrupt is unmasked only when the respective
+					// endpoint has requested a transmission. We can now write its data
+					// from memory to the empty FIFO. Afterwards, if all data has been
+					// written, we mask the interrupt again to indicate this endpoint is
+					// not waiting for an empty FIFO to transmit data.
+					for {
+						size := d.endpointTransmitRemain(uint8(num))
+						if !(0 < size && size <= d.endpointTransmitAvail(uint8(num))) {
+							// Transfer size is zero or greater than free space in Tx FIFO,
+							// so do not attempt to write into FIFO. The FIFO empty interrupt
+							// will remain enabled to retry transmission once sufficient space
+							// is available.
+							break
+						}
+						d.endpointWrite(txEndpoint(uint8(num)),
+							d.endpointInfo(txEndpoint(uint8(num))).data, size)
+					}
+					if d.endpointTransmitRemain(uint8(num)) <= 0 {
+						// Disable Tx FIFO empty interrupt once all data has transmitted
+						// (or no data exists in transmit buffer)
+						d.dev.DIEPEMPMSK.ClearBits(1 << num)
 
-			if stm32.USB_DIEPINT_XFRC == reg&stm32.USB_DIEPINT_XFRC {
-				d.glo.InEp(num).DIEPINT.Set(stm32.USB_DIEPINT_XFRC)
-				d.dev.DIEPEMPMSK.ClearBits(1 << (num & descEndptAddrNumberMsk))
-				// data in stage
-				// d.endpointDataIn(txEndpoint(uint8(num)),
-				// 	d.endpointInfo(txEndpoint(uint8(num))).data)
+						// If transfer size is a non-zero multiple of max packet size, the
+						// STM32 core requires a separate zero-length packet be scheduled
+						// for transmission to complete the handshaking protocol.
+						if 0 == num {
+							d.controlComplete()
+							ep := d.endpointInfo(txEndpoint(uint8(num)))
+							if ep.len > 0 && 0 == ep.len%ep.size {
+								d.controlTransmit(uintptr(0), 0, false)
+							}
+						}
+					}
+				}
 			}
-			if stm32.USB_DIEPINT_TOC == reg&stm32.USB_DIEPINT_TOC {
-				d.glo.InEp(num).DIEPINT.Set(stm32.USB_DIEPINT_TOC)
-			}
-			if stm32.USB_DIEPINT_INEPNE == reg&stm32.USB_DIEPINT_INEPNE {
-				d.glo.InEp(num).DIEPINT.Set(stm32.USB_DIEPINT_INEPNE)
-			}
-			if stm32.USB_DIEPINT_EPDISD == reg&stm32.USB_DIEPINT_EPDISD {
-				d.glo.InEp(num).DIEPINT.Set(stm32.USB_DIEPINT_EPDISD)
-			}
-
-			// drainTx := false
-			if stm32.USB_DIEPINT_ITTXFE == reg&stm32.USB_DIEPINT_ITTXFE {
-				d.glo.InEp(num).DIEPINT.Set(stm32.USB_DIEPINT_ITTXFE)
-				// drainTx = true
-			}
-			if stm32.USB_DIEPINT_TXFE == reg&stm32.USB_DIEPINT_TXFE {
-				// drainTx = true
-			}
-
-			// if drainTx {
-			// 	// write empty Tx FIFO
-			// 	for {
-			// 		size := d.endpointTransmitRemain(uint8(num))
-			// 		if !(0 < size && size <= d.endpointTransmitAvail(uint8(num))) {
-			// 			break
-			// 		}
-			// 		d.endpointWrite(txEndpoint(uint8(num)),
-			// 			d.endpointInfo(txEndpoint(uint8(num))).data, size)
-			// 	}
-			// 	if d.endpointTransmitRemain(uint8(num)) <= 0 {
-			// 		// Disable Tx FIFO empty interrupt once all data has been transmitted
-			// 		d.dev.DIEPEMPMSK.ClearBits(1 << num)
-			// 	}
-			// }
 		}
 	}
 
@@ -570,79 +590,80 @@ func (d *dhw) interrupt() {
 		// TODO: suspend
 	}
 
-	// Bit 12 USBRST: USB reset
-	// The core sets this bit to indicate that a reset is detected on the USB.
-	if d.glo.GINTSTS.HasBits(stm32.USB_GINTSTS_USBRST) {
+	if d.state < dhwStateDefault {
+		// Bit 12 USBRST: USB reset
+		// The core sets this bit to indicate that a reset is detected on the USB.
+		if d.glo.GINTSTS.HasBits(stm32.USB_GINTSTS_USBRST) {
 
-		d.dev.DCTL.ClearBits(stm32.USB_DCTL_RWUSIG)
-		d.endpointFlush(descEndptAddrNumberMsk + 1) // all Tx FIFOs
+			d.dev.DCTL.ClearBits(stm32.USB_DCTL_RWUSIG)
+			d.endpointFlush(descEndptAddrNumberMsk + 1) // all Tx FIFOs
 
-		// Abort any ongoing transfers
-		for i := 0; i < int(d.endpointCount()); i++ {
-			d.glo.InEp(i).DIEPINT.Set(0xFB7F)
-			d.glo.InEp(i).DIEPCTL.ClearBits(stm32.USB_DIEPCTL_STALL)
-			d.glo.InEp(i).DIEPCTL.SetBits(stm32.USB_DIEPCTL_SNAK)
-			d.glo.OutEp(i).DOEPINT.Set(0xFB7F)
-			d.glo.OutEp(i).DOEPCTL.ClearBits(stm32.USB_DOEPCTL_STALL)
-			d.glo.OutEp(i).DOEPCTL.SetBits(stm32.USB_DOEPCTL_SNAK)
+			// Abort any ongoing transfers
+			for i := 0; i < int(d.endpointCount()); i++ {
+				d.glo.InEp(i).DIEPINT.Set(0xFB7F)
+				d.glo.InEp(i).DIEPCTL.ClearBits(stm32.USB_DIEPCTL_STALL)
+				d.glo.InEp(i).DIEPCTL.SetBits(stm32.USB_DIEPCTL_SNAK)
+				d.glo.OutEp(i).DOEPINT.Set(0xFB7F)
+				d.glo.OutEp(i).DOEPCTL.ClearBits(stm32.USB_DOEPCTL_STALL)
+				d.glo.OutEp(i).DOEPCTL.SetBits(stm32.USB_DOEPCTL_SNAK)
+			}
+
+			// Unmask device endpoint interrupts
+			d.dev.DAINTMSK.SetBits(0x00010001) // IN+OUT on control endpoint 0
+			d.dev.DOEPMSK.SetBits(stm32.USB_DOEPMSK_STUPM | stm32.USB_DOEPMSK_XFRCM |
+				stm32.USB_DOEPMSK_EPDM | stm32.USB_DOEPMSK_OTEPSPRM |
+				stm32.USB_DOEPMSK_NAKM | stm32.USB_DOEPMSK_OTEPDM)
+			d.dev.DIEPMSK.SetBits(stm32.USB_DIEPMSK_TOM | stm32.USB_DIEPMSK_XFRCM |
+				stm32.USB_DIEPMSK_EPDM)
+
+			// Allocate RAM for Rx/Tx FIFOs
+			d.resetEndpoints()
+
+			d.event(dcdEvent{id: dcdEventStatusReset})
+
+			d.glo.GINTSTS.Set(d.glo.GINTSTS.Get() & stm32.USB_GINTSTS_USBRST)
 		}
 
-		// Unmask device endpoint interrupts
-		d.dev.DAINTMSK.SetBits(0x00010001) // IN+OUT on control endpoint 0
-		d.dev.DOEPMSK.SetBits(stm32.USB_DOEPMSK_STUPM | stm32.USB_DOEPMSK_XFRCM |
-			stm32.USB_DOEPMSK_EPDM | stm32.USB_DOEPMSK_OTEPSPRM |
-			stm32.USB_DOEPMSK_NAKM | stm32.USB_DOEPMSK_OTEPDM)
-		d.dev.DIEPMSK.SetBits(stm32.USB_DIEPMSK_TOM | stm32.USB_DIEPMSK_XFRCM |
-			stm32.USB_DIEPMSK_EPDM | stm32.USB_DIEPMSK_ITTXFEMSK |
-			stm32.USB_DIEPMSK_INEPNEM)
+		// Bit 13 ENUMDNE: Enumeration done
+		//   The core sets this bit to indicate that speed enumeration is complete.
+		//   The application must read the OTG_DSTS register to obtain the
+		//   enumerated speed.
+		if d.glo.GINTSTS.HasBits(stm32.USB_GINTSTS_ENUMDNE) {
 
-		// Allocate RAM for Rx/Tx FIFOs
-		d.resetEndpoints()
+			// Get the USB bus speed
+			if d.dev.DSTS.HasBits(stm32.USB_DSTS_ENUMSPD) {
+				d.speed = FullSpeed
+			} else {
+				d.speed = HighSpeed
+			}
 
-		// Set device address to default (0) during initialization.
-		//
-		// Address 0 is used for communication from the host to all devices after
-		// reset and during initialization. The protocol is designed so that only
-		// one device on the bus may be assigned address 0 at any given instant.
-		// During enumeration, the host will perform a control transfer using the
-		// SET_ADDRESS standard request, which will assign a bus-unique address to
-		// our device, and after which time the device must never again respond to
-		// requests at device address 0.
-		d.setDeviceAddress(0)
+			// Set USB turnaround time
+			d.glo.GUSBCFG.ReplaceBits(
+				d.turnaroundTime(descHCLKFrequencyHz)<<stm32.USB_GUSBCFG_TRDT_Pos,
+				stm32.USB_GUSBCFG_TRDT_Msk, 0)
 
-		d.event(dcdEvent{id: dcdEventStatusReset})
+			// Reset maximum packet size on IN (Tx) control endpoint 0. Reconfigured
+			// in endpointEnable, which is called on event dcdEventPeripheralReady.
+			d.glo.InEp(0).DIEPCTL.ClearBits(stm32.USB_DIEPCTL_MPSIZ)
 
-		d.glo.GINTSTS.Set(d.glo.GINTSTS.Get() & stm32.USB_GINTSTS_USBRST)
-	}
+			// Clear global NAKs
+			d.dev.DCTL.SetBits(stm32.USB_DCTL_CGINAK)
 
-	// Bit 13 ENUMDNE: Enumeration done
-	//   The core sets this bit to indicate that speed enumeration is complete.
-	//   The application must read the OTG_DSTS register to obtain the enumerated
-	//   speed.
-	if d.glo.GINTSTS.HasBits(stm32.USB_GINTSTS_ENUMDNE) {
+			// Set device address to default (0) during initialization.
+			//
+			// Address 0 is used for communication from the host to all devices after
+			// reset and during initialization. The protocol is designed so that only
+			// one device on the bus may be assigned address 0 at any given instant.
+			// During enumeration, the host will perform a control transfer using the
+			// SET_ADDRESS standard request, which will assign a bus-unique address to
+			// our device, and after which time the device must never again respond to
+			// requests at device address 0.
+			d.setDeviceAddress(0)
 
-		// Get the USB bus speed
-		if d.dev.DSTS.HasBits(stm32.USB_DSTS_ENUMSPD) {
-			d.speed = FullSpeed
-		} else {
-			d.speed = HighSpeed
+			d.event(dcdEvent{id: dcdEventPeripheralReady})
+
+			d.glo.GINTSTS.Set(d.glo.GINTSTS.Get() & stm32.USB_GINTSTS_ENUMDNE)
 		}
-
-		// Set USB turnaround time
-		d.glo.GUSBCFG.ReplaceBits(
-			d.turnaroundTime(descHCLKFrequencyHz)<<stm32.USB_GUSBCFG_TRDT_Pos,
-			stm32.USB_GUSBCFG_TRDT_Msk, 0)
-
-		// Reset maximum packet size on IN (Tx) control endpoint 0. Reconfigured in
-		// endpointEnable, which is called on event dcdEventPeripheralReady below.
-		d.glo.InEp(0).DIEPCTL.ClearBits(stm32.USB_DIEPCTL_MPSIZ)
-
-		// Clear global NAKs
-		d.dev.DCTL.SetBits(stm32.USB_DCTL_CGINAK)
-
-		d.event(dcdEvent{id: dcdEventPeripheralReady})
-
-		d.glo.GINTSTS.Set(d.glo.GINTSTS.Get() & stm32.USB_GINTSTS_ENUMDNE)
 	}
 
 	// Bit 3 SOF: Start of frame
@@ -696,7 +717,7 @@ func (d *dhw) interrupt() {
 		d.glo.GINTSTS.Set(d.glo.GINTSTS.Get() & stm32.USB_GINTSTS_OTGINT)
 	}
 
-	d.irq.Enable()
+	// d.irq.Enable()
 }
 
 func (d *dhw) setDeviceAddress(addr uint16) {
@@ -707,6 +728,14 @@ func (d *dhw) setDeviceAddress(addr uint16) {
 		// (non-zero) address.
 		d.state = dhwStateAddress
 		d.dev.DCFG.SetBits(d.address << stm32.USB_DCFG_DAD_Pos)
+	} else {
+		if dhwStateInit == d.state {
+			// At this point, we transition to the USB-specified "Default" state,
+			// representing a device that has successfully initialized, enumerated on
+			// the bus, and received a USB reset. It has NOT received a SET_ADDRESS
+			// command yet, and is therefore not yet ready to be used.
+			d.state = dhwStateDefault
+		}
 	}
 }
 
@@ -793,6 +822,26 @@ func (d *dhw) controlStall() {
 	d.endpointStall(txEndpoint(0))
 }
 
+// controlComplete handles control transfer completion on endpoint 0 based on
+// current stage.
+func (d *dhw) controlComplete() {
+	switch d.stage {
+	case dcdStageDataIn:
+		// data IN transfer complete, status stage, read ACK from host
+		d.stage = dcdStageStatusIn
+		d.controlReceive(0, 0, false)
+	case dcdStageDataOut:
+		// data OUT transfer complete, status stage, send ACK to host
+		d.stage = dcdStageStatusOut
+		d.controlTransmit(0, 0, false)
+	case dcdStageStatusIn, dcdStageStatusOut:
+		// status ACK already received, no action needed
+	default:
+		// invalid endpoint state, abort any transfers and stall
+		d.controlStall()
+	}
+}
+
 // controlReceive receives (Rx, OUT) data on control endpoint 0.
 func (d *dhw) controlReceive(data uintptr, size uint32, notify bool) {
 
@@ -801,13 +850,11 @@ func (d *dhw) controlReceive(data uintptr, size uint32, notify bool) {
 	d.endpointInfo(rxEndpoint(0)).count = 0
 
 	ep := d.glo.OutEp(int(rxEndpoint(0)))
-	ep.DOEPTSIZ.ClearBits(stm32.USB_DOEPTSIZ_PKTCNT | stm32.USB_DOEPTSIZ_XFRSIZ)
 	if size > 0 {
 		size = descEndptMaxPktSize
 	}
 	ep.DOEPTSIZ.Set((1 << stm32.USB_DOEPTSIZ_PKTCNT_Pos) |
-		(size << stm32.USB_DOEPTSIZ_XFRSIZ_Pos) |
-		stm32.USB_DOEPTSIZ_STUPCNT)
+		(size << stm32.USB_DOEPTSIZ_XFRSIZ_Pos) | stm32.USB_DOEPTSIZ_STUPCNT)
 	ep.DOEPCTL.SetBits(stm32.USB_DOEPCTL_CNAK | stm32.USB_DOEPCTL_EPENA)
 }
 
@@ -820,14 +867,15 @@ func (d *dhw) controlTransmit(data uintptr, size uint32, notify bool) {
 
 	ep := d.glo.InEp(int(txEndpoint(0)))
 	if 0 == size {
-		// zero-length packet (1 packet, 0 bytes)
+		// zero-length packet (ZLP) encoded as: PKTCNT = 1 packet, XFRSIZ = 0
 		ep.DIEPTSIZ.Set(1 << stm32.USB_DIEPTSIZ_PKTCNT_Pos)
 	} else {
 		pkts := uint32(1)
 		if size > descEndptMaxPktSize {
 			pkts += size / descEndptMaxPktSize
-			size = descEndptMaxPktSize
 		}
+		// transfer size (XFRSIZ) represents the entire transfer size, not just the
+		// short packet remaining after 0 or more max-packet-sized packets (PKTCNT).
 		ep.DIEPTSIZ.Set(0)
 		ep.DIEPTSIZ.Set((pkts << stm32.USB_DIEPTSIZ_PKTCNT_Pos) |
 			(size << stm32.USB_DIEPTSIZ_XFRSIZ_Pos))
@@ -836,19 +884,6 @@ func (d *dhw) controlTransmit(data uintptr, size uint32, notify bool) {
 	ep.DIEPCTL.SetBits(stm32.USB_DIEPCTL_CNAK | stm32.USB_DIEPCTL_EPENA)
 	if size > 0 {
 		d.dev.DIEPEMPMSK.SetBits(1)
-	}
-
-	// write empty Tx FIFO
-	for {
-		size := d.endpointTransmitRemain(0)
-		if !(0 < size && size <= d.endpointTransmitAvail(0)) {
-			break
-		}
-		d.endpointWrite(txEndpoint(0), d.endpointInfo(txEndpoint(0)).data, size)
-	}
-	if d.endpointTransmitRemain(0) <= 0 {
-		// Disable Tx FIFO empty interrupt once all data has been transmitted
-		d.dev.DIEPEMPMSK.ClearBits(1)
 	}
 }
 
@@ -865,6 +900,7 @@ type dhwEndpoint struct {
 	kind  uint8 // Endpoint type
 	// parity bool    // IFrame parity
 	fifo  uint8   // Transmission FIFO number
+	resv  uint32  // Reserved size in FIFO
 	size  uint32  // Endpoint max packet size (bytes)
 	data  uintptr // Pointer to transfer buffer
 	len   uint32  // Current transfer length
@@ -873,7 +909,7 @@ type dhwEndpoint struct {
 
 // endpointAlloc allocates FIFO buffer space and initializes the endpoint state
 // buffer for the given endpoint.
-func (d *dhw) endpointAlloc(endpoint, kind uint8, size uint32) {
+func (d *dhw) endpointAlloc(endpoint, kind uint8, reserved, size uint32) {
 
 	var fifo uint8
 	var isTx bool
@@ -881,16 +917,24 @@ func (d *dhw) endpointAlloc(endpoint, kind uint8, size uint32) {
 
 	switch endpoint {
 	case rxEndpoint(endpoint):
-		// Only modify Rx FIFO for control endpoint 0, which must account for space
-		// required to receive all Rx endpoints for the current device class
-		// configuration. Ignore all other Rx (OUT) endpoints given.
+		// There is only a single Rx FIFO shared by all endpoints, regardless of the
+		// current device class configuration. This FIFO is managed exclusively
+		// through control endpoint 0, which is merely a convention to simplify
+		// system design. For example:
+		// * This "control FIFO" must account for space required to receive data on
+		//   all other Rx endpoints used for a given device class configuration.
+		// * Furthermore, the "control FIFO" must be reconfigured to account for all
+		//   incoming Rx endpoints if/when the device class or class configuration
+		//   is changed at runtime.
+		// If any Rx endpoint other than 0 is received, the FIFO allocation request
+		// is ignored.
 		if 0 == num {
-			words := size/4 + 1
+			words := reserved / 4
 			d.glo.GRXFSIZ.Set(words)
 		}
 	case txEndpoint(endpoint):
 		txOffset := d.glo.GRXFSIZ.Get()
-		words := size/4 + 1
+		words := reserved / 4
 		fifo = num
 		isTx = true
 		if 0 == num {
@@ -900,27 +944,22 @@ func (d *dhw) endpointAlloc(endpoint, kind uint8, size uint32) {
 			for i := uint8(0); i < num-1; i++ {
 				txOffset += d.glo.DIEPTXF[i].Get() >> 16
 			}
-			// Double the Tx buffer size (<< 1) for better performance, according to
-			// reference manual:
-			//
-			//  | More space allocated in the transmit IN endpoint FIFO results in
-			//  | better performance on the USB.
-			//
-			d.glo.DIEPTXF[num-1].Set(((words << 1) << 16) | txOffset)
+			d.glo.DIEPTXF[num-1].Set((words << 16) | txOffset)
 		}
 	}
 
 	// Initialize endpoint state info buffer
 	*d.endpointInfo(endpoint) = dhwEndpoint{
-		num:   num,   // Endpoint number
-		isTx:  isTx,  // Endpoint direction (is IN endpoint)
-		stall: false, // Endpoint stall condition
-		kind:  kind,  // Endpoint type
-		fifo:  fifo,  // Transmission FIFO number
-		size:  size,  // Endpoint max packet size (bytes)
-		data:  0,     // Pointer to transfer buffer
-		len:   0,     // Current transfer length
-		count: 0,     // Partial transfer length in case of multi-packet transfer
+		num:   num,      // Endpoint number
+		isTx:  isTx,     // Endpoint direction (is IN endpoint)
+		stall: false,    // Endpoint stall condition
+		kind:  kind,     // Endpoint type
+		fifo:  fifo,     // Transmission FIFO number
+		resv:  reserved, // Reserved size in FIFO
+		size:  size,     // Endpoint max packet size (bytes)
+		data:  0,        // Pointer to transfer buffer
+		len:   0,        // Current transfer length
+		count: 0,        // Partial transfer length in case of multi-packet transfer
 	}
 }
 
@@ -979,9 +1018,8 @@ func (d *dhw) endpointEnable(endpoint uint8, control bool, config uint32) {
 
 	if control {
 		// Prepare endpoint 0 for setup packet transactions
-		d.glo.OutEp(0).DOEPTSIZ.Set(
-			(stm32.USB_DOEPTSIZ_PKTCNT & (1 << stm32.USB_DOEPTSIZ_PKTCNT_Pos)) |
-				((3 * 8) << stm32.USB_DOEPTSIZ_XFRSIZ_Pos) | stm32.USB_DOEPTSIZ_STUPCNT)
+		d.glo.OutEp(0).DOEPTSIZ.Set((1 << stm32.USB_DOEPTSIZ_PKTCNT_Pos) |
+			((3 * 8) << stm32.USB_DOEPTSIZ_XFRSIZ_Pos) | stm32.USB_DOEPTSIZ_STUPCNT)
 
 		// Enable both Rx and Tx for control endpoint 0. These are recursive calls
 		// to the base case (control == false).
@@ -1093,9 +1131,8 @@ func (d *dhw) endpointStall(endpoint uint8) {
 
 	if 0 == endpoint {
 		// Prepare endpoint 0 for setup packet transactions
-		d.glo.OutEp(0).DOEPTSIZ.Set(
-			(stm32.USB_DOEPTSIZ_PKTCNT & (1 << stm32.USB_DOEPTSIZ_PKTCNT_Pos)) |
-				((3 * 8) << stm32.USB_DOEPTSIZ_XFRSIZ_Pos) | stm32.USB_DOEPTSIZ_STUPCNT)
+		d.glo.OutEp(0).DOEPTSIZ.Set((1 << stm32.USB_DOEPTSIZ_PKTCNT_Pos) |
+			((3 * 8) << stm32.USB_DOEPTSIZ_XFRSIZ_Pos) | stm32.USB_DOEPTSIZ_STUPCNT)
 	}
 }
 
@@ -1149,107 +1186,6 @@ func (d *dhw) endpointSetFeature(endpoint uint8) {
 	case rxEndpoint(endpoint):
 	case txEndpoint(endpoint):
 	}
-}
-
-/**
- * @brief  USBD_LL_SetupStage
- *         Handle the setup stage
- * @param  pdev: device instance
- * @retval status
- */
-// func (d *dhw) endpointSetup(setup dcdSetup) 	{
-
-// 		d.stage = dcdStageSetup;
-
-// 		pdev->ep0_data_len = pdev->request.wLength;
-
-// 		switch (pdev->request.bmRequest & 0x1FU)
-// 		{
-// 			case USB_REQ_RECIPIENT_DEVICE:
-// 				ret = USBD_StdDevReq(pdev, &pdev->request);
-// 				break;
-
-// 			case USB_REQ_RECIPIENT_INTERFACE:
-// 				ret = USBD_StdItfReq(pdev, &pdev->request);
-// 				break;
-
-// 			case USB_REQ_RECIPIENT_ENDPOINT:
-// 				ret = USBD_StdEPReq(pdev, &pdev->request);
-// 				break;
-
-// 			default:
-// 				ret = USBD_LL_StallEP(pdev, (pdev->request.bmRequest & 0x80U));
-// 				break;
-// 		}
-
-// 		return ret;
-// 	}
-
-// func (d *dhw) endpointDataOut(endpoint uint8) {
-// 	num, _ := unpackEndpoint(endpoint)
-// 	if 0 == num {
-// 		info := d.endpointInfo(endpoint)
-// 		// if d.stage == dcdStageDataOut {
-// 		if info.len > info.size {
-// 			info.len -= info.size
-// 			size := info.len
-// 			if size > info.size {
-// 				size = info.size
-// 			}
-// 			d.controlReceive(info.data, size, false)
-// 		} else {
-// 			d.stage = dcdStageStatusIn
-// 			d.controlTransmit(0, 0, false)
-// 		}
-// 		// }
-// 	}
-// }
-
-// func (d *dhw) endpointDataIn(endpoint uint8, data uintptr) {
-// 	num, _ := unpackEndpoint(endpoint)
-// 	if 0 == num {
-// 		info := d.endpointInfo(endpoint)
-// 		// if d.stage == dcdStageDataIn {
-// 		if info.len > info.size {
-// 			info.len -= info.size
-// 			d.controlTransmit(info.data, info.len, false)
-// 			d.stage = dcdStageStatusOut
-// 			d.controlReceive(0, 0, false)
-// 		} else {
-// 			// last packet is MPS multiple, so send ZLP packet
-// 			if (info.size == info.len) && (info.count+info.len >= info.size) {
-// 				d.controlTransmit(info.data, info.size, false)
-// 				d.stage = dcdStageStatusOut
-// 				d.controlReceive(0, 0, false)
-// 			} else {
-// 				d.endpointStall(txEndpoint(0))
-// 				d.stage = dcdStageStatusOut
-// 				d.controlReceive(0, 0, false)
-// 			}
-// 		}
-// 		// }
-// 	}
-// }
-
-// endpointComplete handles transfer completion of a data endpoint.
-func (d *dhw) endpointComplete(endpoint uint8) {
-}
-
-// endpointConfigure configures the given endpoint for transfer.
-func (d *dhw) endpointConfigure(endpoint uint8, packetSize uint16, zlp bool) {
-
-}
-
-// endpointReceiveCount returns the number of bytes received from the given
-// endpoint's Rx FIFO.
-func (d *dhw) endpointReceiveCount(endpoint uint8) uint32 {
-	return d.endpointInfo(rxEndpoint(endpoint)).count
-}
-
-// endpointTransmitCount returns the number of bytes transmitted on the given
-// endpoint's Tx FIFO.
-func (d *dhw) endpointTransmitCount(endpoint uint8) uint32 {
-	return d.endpointInfo(txEndpoint(endpoint)).count
 }
 
 // endpointTransmitAvail returns the number of bytes available for transmission

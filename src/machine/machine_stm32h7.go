@@ -402,7 +402,7 @@ func (p Pin) Configure(config PinConfig) {
 	case PinUSB1FSVBUS:
 		p.setMode(pinInput)
 	case PinUSB1HSULPI:
-		p.setMode(pinAltFunc | pinPushPull | pinPullup | pinModeAltFuncUSB1HS)
+		p.setMode(pinAltFunc | pinPushPull | pinPullup | pinModeSpeedVeryHigh | pinModeAltFuncUSB1HS)
 	case PinUSB2FSDP, PinUSB2FSDM:
 		p.setMode(pinAltFunc | pinPushPull | pinPullup | pinModeAltFuncUSB2FS)
 	}
@@ -442,7 +442,6 @@ func (p Pin) setMode(mode pinMode) {
 	// alternate function mode bit set
 	case pinModeModeAltFunc:
 		var reg *volatile.Register32
-		var pos uint8
 		if bit < 8 {
 			reg = &bus.AFRL // AFRL register used for pins 0-7
 		} else {
@@ -451,7 +450,7 @@ func (p Pin) setMode(mode pinMode) {
 		altf := uint32((mode >> pinModeAltFuncPos) & pinModeAltFuncMsk)
 		for !SemGPIO.Lock(CoreID) {
 		} // wait until we have exclusive access to GPIO
-		reg.ReplaceBits(altf, uint32(pinModeAltFuncMsk), 4*(pos%8))
+		reg.ReplaceBits(altf, uint32(pinModeAltFuncMsk), 4*(bit%8))
 		SemGPIO.Unlock(CoreID)
 	}
 

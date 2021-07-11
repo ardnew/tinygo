@@ -32,14 +32,20 @@ const (
 	descCDCACMTxTimeoutMs = 120 // millisec
 	descCDCACMTxSyncUs    = 75  // microsec
 
-	// Default CDC-ACM Endpoint Configurations (Full-Speed)
+	// Default CDC-ACM Endpoint Configurations
 
-	descCDCACMStatusInterval   = descCDCACMStatusFSInterval   // Status
-	descCDCACMStatusPacketSize = descCDCACMStatusFSPacketSize //  (Interupt IN)
-	descCDCACMDataRxPacketSize = descCDCACMDataRxFSPacketSize // Rx (Bulk OUT)
-	descCDCACMDataTxPacketSize = descCDCACMDataTxFSPacketSize // Tx (Bulk IN)
+	descCDCACMRxFIFOSize = descCDCACMRxFIFOHSSize
+	descCDCACMTxFIFOSize = descCDCACMTxFIFOHSSize
+
+	descCDCACMStatusInterval   = descCDCACMStatusHSInterval   // Status
+	descCDCACMStatusPacketSize = descCDCACMStatusHSPacketSize //  (Interupt IN)
+	descCDCACMDataRxPacketSize = descCDCACMDataRxHSPacketSize // Rx (Bulk OUT)
+	descCDCACMDataTxPacketSize = descCDCACMDataTxHSPacketSize // Tx (Bulk IN)
 
 	// CDC-ACM Endpoint Configurations for Full-Speed Device
+
+	descCDCACMRxFIFOFSSize = 64 << 3
+	descCDCACMTxFIFOFSSize = 64 << 3
 
 	descCDCACMStatusFSInterval   = 5  // Status
 	descCDCACMStatusFSPacketSize = 16 //  (full-speed)
@@ -47,6 +53,9 @@ const (
 	descCDCACMDataTxFSPacketSize = 64 // Tx (full-speed)
 
 	// CDC-ACM Endpoint Configurations for High-Speed Device
+
+	descCDCACMRxFIFOHSSize = 512 << 2
+	descCDCACMTxFIFOHSSize = 512 << 1
 
 	descCDCACMStatusHSInterval   = 5   // Status
 	descCDCACMStatusHSPacketSize = 64  //  (high-speed)
