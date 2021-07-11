@@ -146,7 +146,6 @@ func initBoard() {
 
 	// Call the board support initialization
 	machine.InitBoard()
-
 }
 
 const (

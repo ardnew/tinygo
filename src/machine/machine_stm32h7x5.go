@@ -8,65 +8,81 @@ import (
 	"unsafe"
 )
 
-// EnableClock enables or disables the clock gate for the given peripheral.
+// EnableClock enables or disables the clock gate(s) for the given peripheral.
+// If the peripheral depends on multiple clock gates for normal operation, then
+// each of those gates are enabled/disabled.
 func EnableClock(bus unsafe.Pointer, enable bool) bool {
-	var reg *volatile.Register32
-	var msk uint32
+
+	regMask := map[*volatile.Register32]uint32{}
+
 	switch bus {
 
-	// AHB1
+	// AHB1/AHB1LP
 	case unsafe.Pointer(stm32.ART):
-		reg, msk = &stm32.RCC.AHB1ENR, stm32.RCC_AHB1ENR_ARTEN
+		regMask[&stm32.RCC.AHB1ENR] = stm32.RCC_AHB1ENR_ARTEN
 	case unsafe.Pointer(stm32.OTG1_HS_DEVICE):
-		reg, msk = &stm32.RCC.AHB1ENR, stm32.RCC_AHB1ENR_USB1OTGEN
+		// Configure both OTG PHY and ULPI clocks for USB 1
+		regMask[&stm32.RCC.AHB1ENR] =
+			stm32.RCC_AHB1ENR_USB1OTGEN | stm32.RCC_AHB1ENR_USB1ULPIEN
+		// Also configure the corresponding low-power clocks for USB 1
+		regMask[&stm32.RCC.AHB1LPENR] =
+			stm32.RCC_AHB1LPENR_USB1OTGLPEN | stm32.RCC_AHB1LPENR_USB1ULPILPEN
 	case unsafe.Pointer(stm32.OTG2_HS_DEVICE):
-		reg, msk = &stm32.RCC.AHB1ENR, stm32.RCC_AHB1ENR_USB2OTGEN
-	case unsafe.Pointer(stm32.OTG1_HS_PWRCLK):
-		reg, msk = &stm32.RCC.AHB1ENR, stm32.RCC_AHB1ENR_USB1ULPIEN
-	case unsafe.Pointer(stm32.OTG2_HS_PWRCLK):
-		reg, msk = &stm32.RCC.AHB1ENR, stm32.RCC_AHB1ENR_USB2ULPIEN
+		// Configure both OTG PHY and ULPI clocks for USB 2
+		regMask[&stm32.RCC.AHB1ENR] =
+			stm32.RCC_AHB1ENR_USB2OTGEN | stm32.RCC_AHB1ENR_USB2ULPIEN
+		// Also configure the corresponding low-power clocks for USB 2
+		regMask[&stm32.RCC.AHB1LPENR] =
+			stm32.RCC_AHB1LPENR_USB2OTGLPEN | stm32.RCC_AHB1LPENR_USB2ULPILPEN
 
 	// APB4
 	case unsafe.Pointer(stm32.SYSCFG):
-		reg, msk = &stm32.RCC.APB4ENR, stm32.RCC_APB4ENR_SYSCFGEN
+		regMask[&stm32.RCC.APB4ENR] = stm32.RCC_APB4ENR_SYSCFGEN
 
 	// AHB4
 	case unsafe.Pointer(stm32.HSEM):
-		reg, msk = &stm32.RCC.AHB4ENR, stm32.RCC_AHB4ENR_HSEMEN
+		regMask[&stm32.RCC.AHB4ENR] = stm32.RCC_AHB4ENR_HSEMEN
 	case unsafe.Pointer(stm32.GPIOA):
-		reg, msk = &stm32.RCC.AHB4ENR, stm32.RCC_AHB4ENR_GPIOAEN
+		regMask[&stm32.RCC.AHB4ENR] = stm32.RCC_AHB4ENR_GPIOAEN
 	case unsafe.Pointer(stm32.GPIOB):
-		reg, msk = &stm32.RCC.AHB4ENR, stm32.RCC_AHB4ENR_GPIOBEN
+		regMask[&stm32.RCC.AHB4ENR] = stm32.RCC_AHB4ENR_GPIOBEN
 	case unsafe.Pointer(stm32.GPIOC):
-		reg, msk = &stm32.RCC.AHB4ENR, stm32.RCC_AHB4ENR_GPIOCEN
+		regMask[&stm32.RCC.AHB4ENR] = stm32.RCC_AHB4ENR_GPIOCEN
 	case unsafe.Pointer(stm32.GPIOD):
-		reg, msk = &stm32.RCC.AHB4ENR, stm32.RCC_AHB4ENR_GPIODEN
+		regMask[&stm32.RCC.AHB4ENR] = stm32.RCC_AHB4ENR_GPIODEN
 	case unsafe.Pointer(stm32.GPIOE):
-		reg, msk = &stm32.RCC.AHB4ENR, stm32.RCC_AHB4ENR_GPIOEEN
+		regMask[&stm32.RCC.AHB4ENR] = stm32.RCC_AHB4ENR_GPIOEEN
 	case unsafe.Pointer(stm32.GPIOF):
-		reg, msk = &stm32.RCC.AHB4ENR, stm32.RCC_AHB4ENR_GPIOFEN
+		regMask[&stm32.RCC.AHB4ENR] = stm32.RCC_AHB4ENR_GPIOFEN
 	case unsafe.Pointer(stm32.GPIOG):
-		reg, msk = &stm32.RCC.AHB4ENR, stm32.RCC_AHB4ENR_GPIOGEN
+		regMask[&stm32.RCC.AHB4ENR] = stm32.RCC_AHB4ENR_GPIOGEN
 	case unsafe.Pointer(stm32.GPIOH):
-		reg, msk = &stm32.RCC.AHB4ENR, stm32.RCC_AHB4ENR_GPIOHEN
+		regMask[&stm32.RCC.AHB4ENR] = stm32.RCC_AHB4ENR_GPIOHEN
 	case unsafe.Pointer(stm32.GPIOI):
-		reg, msk = &stm32.RCC.AHB4ENR, stm32.RCC_AHB4ENR_GPIOIEN
+		regMask[&stm32.RCC.AHB4ENR] = stm32.RCC_AHB4ENR_GPIOIEN
 	case unsafe.Pointer(stm32.GPIOJ):
-		reg, msk = &stm32.RCC.AHB4ENR, stm32.RCC_AHB4ENR_GPIOJEN
+		regMask[&stm32.RCC.AHB4ENR] = stm32.RCC_AHB4ENR_GPIOJEN
 	case unsafe.Pointer(stm32.GPIOK):
-		reg, msk = &stm32.RCC.AHB4ENR, stm32.RCC_AHB4ENR_GPIOKEN
+		regMask[&stm32.RCC.AHB4ENR] = stm32.RCC_AHB4ENR_GPIOKEN
 	}
-	if nil != reg {
+
+	// if regMask is empty, we received an unhandled peripheral
+	ok := len(regMask) > 0
+
+	for reg, mask := range regMask {
 		for !SemRCC.Lock(CoreID) {
 		} // wait until we have exclusive access to RCC
 		if enable {
-			reg.SetBits(msk)
+			reg.SetBits(mask)
 		} else {
-			reg.ClearBits(msk)
+			reg.ClearBits(mask)
 		}
+		// Reading the register back out gives RCC a few cycles to enable the clock,
+		// and lets us verify the change was accepted.
+		ok = ok && (enable == reg.HasBits(mask))
+		// Release the semaphore once we've performed all accesses
 		SemRCC.Unlock(CoreID)
-		// msk must be 1-bit for this to be correct (always true, I think?)
-		return enable == reg.HasBits(msk)
 	}
-	return false // unsupported peripheral
+
+	return ok
 }

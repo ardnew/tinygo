@@ -245,20 +245,23 @@ func indexEndpoint(index uint8) uint8 {
 }
 
 // wrap computes the index into a circular buffer of length mod by walking
-// forward n elements if n is positive, or reverse n elements if n is negative.
-// For example, both wrap(42, 10) and wrap(-308, 10) return 2.
+// forward n elements if n is positive, or reverse -n elements if n is negative.
+// For example, both wrap(12, 10) and wrap(-18, 10) return 2.
 //go:inline
 func wrap(n, mod int) int {
-	if mod <= 0 || n == mod {
+	if mod <= 0 {
+		// Buffer length (mod) must be positive.
 		return 0
 	}
 	if n < 0 {
 		if -n < mod {
+			// Do not wrap around (no underflow).
 			return mod + n
 		}
 		return mod - (-n % mod)
 	}
 	if n < mod {
+		// Do not wrap around (no overflow).
 		return n
 	}
 	return n % mod

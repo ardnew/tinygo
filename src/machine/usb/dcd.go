@@ -211,7 +211,7 @@ func (d *dcd) controlSetup(sup dcdSetup) dcdStage {
 			case descRequestStandardSetAddress:
 				d.setDeviceAddress(sup.wValue)
 				d.controlReceive(uintptr(0), 0, false)
-				return dcdStageSetup
+				return dcdStageDataOut
 
 			// SET CONFIGURATION (0x09):
 			case descRequestStandardSetConfiguration:
@@ -240,7 +240,7 @@ func (d *dcd) controlSetup(sup dcdSetup) dcdStage {
 				default:
 					// Unhandled device class
 				}
-				return dcdStageSetup
+				return dcdStageDataOut
 
 			default:
 				// Unhandled request
@@ -258,7 +258,7 @@ func (d *dcd) controlSetup(sup dcdSetup) dcdStage {
 				d.controlReply[1] = 0
 				d.controlTransmit(
 					uintptr(unsafe.Pointer(&d.controlReply[0])), 2, false)
-				return dcdStageSetup
+				return dcdStageDataIn
 
 			// GET DESCRIPTOR (0x06):
 			case descRequestStandardGetDescriptor:
@@ -269,12 +269,12 @@ func (d *dcd) controlSetup(sup dcdSetup) dcdStage {
 				// CDC-ACM (single)
 				case classDeviceCDCACM:
 					d.controlDescriptorCDCACM(sup)
-					return dcdStageSetup
+					return dcdStageDataIn
 
 				// HID
 				case classDeviceHID:
 					d.controlDescriptorHID(sup)
-					return dcdStageSetup
+					return dcdStageDataIn
 
 				default:
 					// Unhandled device class
@@ -285,7 +285,7 @@ func (d *dcd) controlSetup(sup dcdSetup) dcdStage {
 				d.controlReply[0] = uint8(d.cc.config)
 				d.controlTransmit(
 					uintptr(unsafe.Pointer(&d.controlReply[0])), 1, false)
-				return dcdStageSetup
+				return dcdStageDataIn
 
 			default:
 				// Unhandled request
@@ -306,12 +306,12 @@ func (d *dcd) controlSetup(sup dcdSetup) dcdStage {
 				// CDC-ACM (single)
 				case classDeviceCDCACM:
 					d.controlDescriptorCDCACM(sup)
-					return dcdStageSetup
+					return dcdStageDataIn
 
 				// HID
 				case classDeviceHID:
 					d.controlDescriptorHID(sup)
-					return dcdStageSetup
+					return dcdStageDataIn
 
 				default:
 					// Unhandled device class
@@ -326,7 +326,7 @@ func (d *dcd) controlSetup(sup dcdSetup) dcdStage {
 				// HID
 				case classDeviceHID:
 					d.controlDescriptorHID(sup)
-					return dcdStageSetup
+					return dcdStageDataIn
 
 				default:
 					// Unhandled device class
@@ -346,13 +346,13 @@ func (d *dcd) controlSetup(sup dcdSetup) dcdStage {
 			case descRequestStandardClearFeature:
 				d.endpointClearFeature(uint8(sup.wIndex))
 				d.controlReceive(uintptr(0), 0, false)
-				return dcdStageSetup
+				return dcdStageDataOut
 
 			// SET FEATURE (0x03):
 			case descRequestStandardSetFeature:
 				d.endpointSetFeature(uint8(sup.wIndex))
 				d.controlReceive(uintptr(0), 0, false)
-				return dcdStageSetup
+				return dcdStageDataOut
 
 			default:
 				// Unhandled request
@@ -371,7 +371,7 @@ func (d *dcd) controlSetup(sup dcdSetup) dcdStage {
 				d.controlReply[1] = uint8(status >> 8)
 				d.controlTransmit(
 					uintptr(unsafe.Pointer(&d.controlReply[0])), 2, false)
-				return dcdStageSetup
+				return dcdStageDataIn
 
 			default:
 				// Unhandled request
@@ -410,7 +410,7 @@ func (d *dcd) controlSetup(sup dcdSetup) dcdStage {
 							descCDCACMCodingSize, true)
 						// CDC Line Coding packet receipt handling occurs in method
 						// controlComplete().
-						return dcdStageSetup
+						return dcdStageDataOut
 					}
 
 				default:
@@ -434,7 +434,7 @@ func (d *dcd) controlSetup(sup dcdSetup) dcdStage {
 						// DTR is bit 0 (mask 0x01), RTS is bit 1 (mask 0x02)
 						d.uartSetLineState(0 != sup.wValue&0x01, 0 != sup.wValue&0x02)
 						d.controlReceive(uintptr(0), 0, false)
-						return dcdStageSetup
+						return dcdStageDataOut
 
 					default:
 						// Unhandled device interface
@@ -453,7 +453,7 @@ func (d *dcd) controlSetup(sup dcdSetup) dcdStage {
 				// CDC-ACM (single)
 				case classDeviceCDCACM:
 					d.controlReceive(uintptr(0), 0, false)
-					return dcdStageSetup
+					return dcdStageDataOut
 
 				default:
 					// Unhandled device class
@@ -473,7 +473,7 @@ func (d *dcd) controlSetup(sup dcdSetup) dcdStage {
 						d.controlReceive(
 							uintptr(unsafe.Pointer(&descHID[d.cc.config-1].cx[0])),
 							uint32(sup.wLength), true)
-						return dcdStageSetup
+						return dcdStageDataOut
 					}
 
 				default:
@@ -493,7 +493,7 @@ func (d *dcd) controlSetup(sup dcdSetup) dcdStage {
 					// interface of the request.
 					_ = idleRate
 					d.controlReceive(uintptr(0), 0, false)
-					return dcdStageSetup
+					return dcdStageDataOut
 
 				default:
 					// Unhandled device class
@@ -526,7 +526,7 @@ func (d *dcd) controlSetup(sup dcdSetup) dcdStage {
 					d.controlReply[1] = 0
 					d.controlTransmit(
 						uintptr(unsafe.Pointer(&d.controlReply[0])), 2, false)
-					return dcdStageSetup
+					return dcdStageDataIn
 
 				default:
 					// Unhandled device class
