@@ -24,3 +24,8 @@ package usb
 //   bit times added per PHY clock is 0.25 bit times.
 //
 const descHCLKFrequencyHz = 240000000
+
+// descAPB1FrequencyHz defines the APB1 clock frequency used as a clock source
+// for the LPTIM1 timer. This timer is used to regularly flush UART Tx buffer
+// from application memory to the endpoint Tx FIFO.
+const descAPB1FrequencyHz = 120000000

@@ -35,6 +35,10 @@ func EnableClock(bus unsafe.Pointer, enable bool) bool {
 		regMask[&stm32.RCC.AHB1LPENR] =
 			stm32.RCC_AHB1LPENR_USB2OTGLPEN | stm32.RCC_AHB1LPENR_USB2ULPILPEN
 
+	// APB1/APB1L
+	case unsafe.Pointer(stm32.LPTIM1):
+		regMask[&stm32.RCC.APB1LENR] = stm32.RCC_APB1LENR_LPTIM1EN
+
 	// APB4
 	case unsafe.Pointer(stm32.SYSCFG):
 		regMask[&stm32.RCC.APB4ENR] = stm32.RCC_APB4ENR_SYSCFGEN

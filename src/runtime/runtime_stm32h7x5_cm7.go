@@ -114,6 +114,22 @@ func initAccel() {
 
 func initCoreClocks() {
 
+	// Ensure HSI (64 MHz) is used as PER clock source
+	stm32.RCC.D1CCIPR.ReplaceBits(
+		stm32.RCC_D1CCIPR_CKPERSEL_HSI<<stm32.RCC_D1CCIPR_CKPERSEL_Pos,
+		stm32.RCC_D1CCIPR_CKPERSEL_Msk, 0)
+
+	// Select PER (64 MHz) as LPTIM1 clock source
+	stm32.RCC.D2CCIP2R.ReplaceBits(
+		stm32.RCC_D2CCIP2R_LPTIM1SEL_PER<<stm32.RCC_D2CCIP2R_LPTIM1SEL_Pos,
+		stm32.RCC_D2CCIP2R_LPTIM1SEL_Msk, 0)
+
+	// Enable LPTIM1, used for USB device class drivers (e.g. USB UART Tx flush)
+	_ = machine.EnableClock(unsafe.Pointer(stm32.LPTIM1), true)
+
+	// Force LPTIM1 to stop operation (freeze) while core is in debug mode.
+	stm32.DBGMCU.APB1LFZ1.SetBits(stm32.DBG_APB1LFZ1_LPTIM1)
+
 	// Select HSI48 as USB clock source
 	stm32.RCC.D2CCIP2R.ReplaceBits(
 		stm32.RCC_D2CCIP2R_USBSEL_HSI48<<stm32.RCC_D2CCIP2R_USBSEL_Pos,
@@ -127,11 +143,11 @@ func initCoreClocks() {
 	_ = machine.EnableClock(unsafe.Pointer(stm32.SYSCFG), true)
 	stm32.SYSCFG.CCCSR.SetBits(stm32.SYSCFG_CCCSR_EN)
 
-	// Configure low-speed external oscillator 32 K quartz crystal
+	// Configure low-speed external oscillator (LSE, 32 kHz) quartz crystal
 	initLowSpeedCrystal(lseDriveLow)
 
 	// initialize SYSCLK (PLL1 with HSE)
-	if freq, ok := initCoreFreq(true, false); ok {
+	if freq, ok := initCoreFreq(false); ok {
 		// re-initialize SysTick with increased frequencies
 		initSysTick(freq)
 	}
@@ -155,13 +171,15 @@ const (
 	lseDriveHigh
 )
 
+// initLowSpeedCrystal configures the low-speed external (LSE) oscillator quartz
+// crystal (32 kHz) for normal operation.
 func initLowSpeedCrystal(drive uint32) {
 
 	const revisionY = 0x1003 // STM32H7 revision Y
 
 	if !stm32.RCC.BDCR.HasBits(stm32.RCC_BDCR_LSERDY) {
 		// LSE is in the backup domain (DBP) and write access is denied to DBP after
-		// reset, so we first have to enable write access for DBP before configuring.
+		// reset, so we first have to enable DBP write access before configuring.
 		stm32.PWR.CR1.SetBits(stm32.PWR_CR1_DBP)
 		if (lseDriveMedLow <= drive && drive <= lseDriveMedHigh) &&
 			(stm32.DBGMCU.IDC.Get()&stm32.DBG_IDC_REV_ID_Msk)>>
@@ -172,7 +190,32 @@ func initLowSpeedCrystal(drive uint32) {
 	}
 }
 
-func initCoreFreq(bypass, lowSpeed bool) (stm32.RCC_CLK_Type, bool) {
+// initCoreFreq configures the system core clock using the PLL (clocked via HSE)
+// as clock source. Based on the given lowSpeed argument, the various resulting
+// system clock frequencies are shown here:
+//
+//                   +-----------+-----------+
+//                   | Reg Speed | Low Speed |
+//      +------------+-----------+-----------+
+//      |     SYSCLK |  480 MHz  |  100 MHz  |  =>  M7 CPU/SysTick
+//      |     AHBCLK |  240 MHz  |   50 MHz  |  =>  M4 CPU/SysTick, AXI
+//      |    APB1CLK |  120 MHz  |   25 MHz  |  =>  APB1 Periphs
+//      | (*)APB1CLK |  240 MHz  |   50 MHz  |  =>  APB1 xTIMs
+//      |    APB2CLK |  120 MHz  |   25 MHz  |  =>  APB2 Periphs
+//      | (*)APB2CLK |  240 MHz  |   50 MHz  |  =>  APB2 xTIMs
+//      |    APB3CLK |  120 MHz  |   25 MHz  |  =>  APB3 Periphs
+//      |    APB4CLK |  120 MHz  |   25 MHz  |  =>  APB4 Periphs/xTIMs
+//      |    AHB4CLK |  240 MHz  |   50 MHz  |  =>  AHB4 Periphs
+//      +------------+-----------+-----------+
+//
+// IMPORTANT:
+//   Note that this routine should be called ONLY ONE TIME. In particular, it
+//   should be called by the main CPU core used for system initialization. This
+//   is currently the Cortex-M7 core in TinyGo, which controls the clock gate
+//   used to boot the Cortex-M4 core (after the core clocks, RAM, and any other
+//   common resources are initialized).
+//
+func initCoreFreq(lowSpeed bool) (stm32.RCC_CLK_Type, bool) {
 
 	// First need to change SYSCLK source to CSI before modifying the main PLL
 	if stm32.RCC_PLL_SRC_HSE == (stm32.RCC.PLLCKSELR.Get()&
@@ -203,10 +246,11 @@ func initCoreFreq(bypass, lowSpeed bool) (stm32.RCC_CLK_Type, bool) {
 	for !stm32.PWR_FLAG_VOSRDY.Get() {
 	} // wait for voltage to stabilize
 
-	// Enable HSE oscillator and activate PLL with HSE as source
+	// Enable HSE, HSI, HSI48 oscillators and activate PLL with HSE as source
 	osc := stm32.RCC_OSC_CFG_Type{
-		OSC:   stm32.RCC_OSC_HSE | stm32.RCC_OSC_HSI48,
-		HSE:   stm32.RCC_CR_HSEON,
+		OSC:   stm32.RCC_OSC_HSE | stm32.RCC_OSC_HSI | stm32.RCC_OSC_HSI48,
+		HSE:   stm32.RCC_CR_HSEON | stm32.RCC_CR_HSEBYP,
+		HSI:   stm32.RCC_CR_HSION,
 		HSI48: stm32.RCC_CR_HSI48ON,
 		PLL1: stm32.RCC_PLL_CFG_Type{
 			PLL: stm32.RCC_PLL_ON,
@@ -224,9 +268,6 @@ func initCoreFreq(bypass, lowSpeed bool) (stm32.RCC_CLK_Type, bool) {
 				VCO: stm32.RCC_PLL1_VCO_WIDE,
 			},
 		},
-	}
-	if bypass {
-		osc.HSE = stm32.RCC_CR_HSEBYP | stm32.RCC_CR_HSEON
 	}
 	if lowSpeed {
 		osc.PLL1.Div.N = 40

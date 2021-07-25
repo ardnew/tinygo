@@ -2,6 +2,8 @@
 
 package usb
 
+import "runtime/volatile"
+
 // descCDCACMCount defines the number of USB cores that may be configured as
 // CDC-ACM (single) devices.
 const descCDCACMCount = 1
@@ -25,22 +27,14 @@ const (
 // Constants for USB CDC-ACM device classes.
 const (
 
-	// CDC-ACM Control Endpoint 0 Configuration and Buffer
+	// CDC-ACM Control Endpoint 0 Configuration
 
 	descCDCACMCxCount = 64 // Control buffer is always 64 bytes
 
+	// CDC-ACM UART Buffer & Transfer Configuration
+
 	descCDCACMTxTimeoutMs = 120 // millisec
 	descCDCACMTxSyncUs    = 75  // microsec
-
-	// Default CDC-ACM Endpoint Configurations
-
-	descCDCACMRxFIFOSize = descCDCACMRxFIFOHSSize
-	descCDCACMTxFIFOSize = descCDCACMTxFIFOHSSize
-
-	descCDCACMStatusInterval   = descCDCACMStatusHSInterval   // Status
-	descCDCACMStatusPacketSize = descCDCACMStatusHSPacketSize //  (Interupt IN)
-	descCDCACMDataRxPacketSize = descCDCACMDataRxHSPacketSize // Rx (Bulk OUT)
-	descCDCACMDataTxPacketSize = descCDCACMDataTxHSPacketSize // Tx (Bulk IN)
 
 	// CDC-ACM Endpoint Configurations for Full-Speed Device
 
@@ -55,7 +49,7 @@ const (
 	// CDC-ACM Endpoint Configurations for High-Speed Device
 
 	descCDCACMRxFIFOHSSize = 512 << 2
-	descCDCACMTxFIFOHSSize = 512 << 1
+	descCDCACMTxFIFOHSSize = 512 << 2
 
 	descCDCACMStatusHSInterval   = 5   // Status
 	descCDCACMStatusHSPacketSize = 64  //  (high-speed)
@@ -86,26 +80,6 @@ const (
 	// HID Joystick Configuration and Buffers
 
 	descHIDJoystickTxTimeoutMs = 30 // millisec
-
-	// Default HID Endpoint Configurations (High-Speed)
-
-	descHIDSerialRxInterval   = descHIDSerialRxFSInterval   // Serial Rx
-	descHIDSerialRxPacketSize = descHIDSerialRxFSPacketSize //  (Interrupt OUT)
-
-	descHIDSerialTxInterval   = descHIDSerialTxFSInterval   // Serial Tx
-	descHIDSerialTxPacketSize = descHIDSerialTxFSPacketSize //  (Interrupt IN)
-
-	descHIDKeyboardTxInterval   = descHIDKeyboardTxFSInterval   // Keyboard
-	descHIDKeyboardTxPacketSize = descHIDKeyboardTxFSPacketSize //  (Interrupt IN)
-
-	descHIDMediaKeyTxInterval   = descHIDMediaKeyTxFSInterval   // Keyboard Media Keys
-	descHIDMediaKeyTxPacketSize = descHIDMediaKeyTxFSPacketSize //  (Interrupt IN)
-
-	descHIDMouseTxInterval   = descHIDMouseTxFSInterval   // Mouse
-	descHIDMouseTxPacketSize = descHIDMouseTxFSPacketSize //  (Interrupt IN)
-
-	descHIDJoystickTxInterval   = descHIDJoystickTxFSInterval   // Joystick
-	descHIDJoystickTxPacketSize = descHIDJoystickTxFSPacketSize //  (Interrupt IN)
 
 	// HID Endpoint Configurations for Full-Speed Device
 
@@ -154,7 +128,7 @@ const (
 // Endpoints are mapped to elements of the buffer using the "logical index" of
 // each endpoint address. This uses the first bit as the endpoint direction --
 // where Rx=0, Tx=1 -- followed by all bits in the endpoint number.
-// In other  words, Rx endpoints are the even-numbered indices, Tx endpoints are
+// In other words, Rx endpoints are the even-numbered indices, Tx endpoints are
 // the odd-numbered indices.
 // Or, expressed arithmetically, Rx endpoint N = 2N, Tx endpoint N = 2N + 1.
 //go:align 32
@@ -174,12 +148,30 @@ var descCDCACM0Dx [descCDCACMConfigSize]uint8
 // descCDCACM0Rx is the receive (Rx) buffer of bulk OUT endpoint data for the
 // default CDC-ACM (single) device class configuration (index 1).
 //go:align 32
-var descCDCACM0Rx [descCDCACMDataRxPacketSize]uint8
+var descCDCACM0Rx [descCDCACMRxFIFOSize]uint8
 
 // descCDCACM0Tx is the transmit (Tx) buffer of bulk IN endpoint data for the
 // default CDC-ACM (single) device class configuration (index 1).
 //go:align 32
-var descCDCACM0Tx [descCDCACMDataTxPacketSize]uint8
+var descCDCACM0Tx [descCDCACMTxFIFOSize]uint8
+
+// descCDCACM0Rq is the receive (Rx) ring buffer used to serialize data received
+// from the bulk data OUT endpoint to the UART interface for the default CDC-ACM
+// (single) device class configuration (index 1).
+//go:align 32
+var descCDCACM0Rq [dhwDataQueueSize]uint8
+
+// descCDCACM0Tq is the transmit (Tx) ring buffer used to serialize data written
+// from the UART interface to the bulk data IN endpoint for the default CDC-ACM
+// (single) device class configuration (index 1).
+//go:align 32
+var descCDCACM0Tq [dhwDataQueueSize]uint8
+
+// descCDCACM0Ts is the transfer ring buffer used to schedule transmit (Tx) data
+// transfers on the bulk IN endpoint for the default CDC-ACM (single) device
+// class configuration (index 1).
+//go:align 32
+//var descCDCACM0Xq [dhwTransferQueueSize]*dhwTransfer
 
 // descCDCACMClassData holds the buffers and control states for all CDC-ACM
 // (single) device class configurations, ordered by index (offset by -1), for
@@ -203,10 +195,14 @@ type descCDCACMClassData struct {
 
 	// CDC-ACM Data Buffers
 
-	rx *[descCDCACMDataRxPacketSize]uint8 // bulk data endpoint Rx (OUT) transfer buffer
-	tx *[descCDCACMDataTxPacketSize]uint8 // bulk data endpoint Tx (IN) transfer buffer
+	rx *[descCDCACMRxFIFOSize]uint8 // bulk data endpoint Rx (OUT) transfer buffer
+	tx *[descCDCACMTxFIFOSize]uint8 // bulk data endpoint Tx (IN) transfer buffer
 
-	sxSize uint16
+	rq dhwDataQueue // bulk data endpoint Rx (OUT) to UART serialization queue
+	tq dhwDataQueue // bulk data endpoint Tx (IN) from UART serialization queue
+
+	//xq dhwTransferQueue // bulk data endpoint Tx (IN) transfer queue
+
 	rxSize uint16
 	txSize uint16
 }
@@ -234,7 +230,23 @@ var descCDCACMData = [dcdCount]descCDCACMClassData{
 		rx: &descCDCACM0Rx, // bulk data endpoint Rx (OUT) transfer buffer
 		tx: &descCDCACM0Tx, // bulk data endpoint Tx (IN) transfer buffer
 
-		sxSize: descCDCACMStatusPacketSize,
+		rq: dhwDataQueue{ // bulk data endpoint Rx (OUT) to UART serialization queue
+			fifo: &descCDCACM0Rq,
+			head: &volatile.Register32{},
+			tail: &volatile.Register32{},
+		},
+		tq: dhwDataQueue{ // bulk data endpoint Tx (IN) from UART serialization queue
+			fifo: &descCDCACM0Tq,
+			head: &volatile.Register32{},
+			tail: &volatile.Register32{},
+		},
+
+		//xq: dhwTransferQueue{ // bulk data endpoint Tx (IN) transfer queue
+		//	fifo: &descCDCACM0Ts,
+		//	head: &volatile.Register32{},
+		//	tail: &volatile.Register32{},
+		//},
+
 		rxSize: descCDCACMDataRxPacketSize,
 		txSize: descCDCACMDataTxPacketSize,
 	},

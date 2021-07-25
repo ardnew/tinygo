@@ -77,7 +77,7 @@ type dcdSetup struct {
 
 func setupFrom(addr uintptr) dcdSetup {
 	var u uint64
-	for i := uintptr(0); i < 8; i++ {
+	for i := uintptr(0); i < dcdSetupSize; i++ {
 		u |= uint64(*(*uint8)(unsafe.Pointer(addr + i))) << (i << 3)
 	}
 	return dcdSetup{
@@ -90,7 +90,7 @@ func setupFrom(addr uintptr) dcdSetup {
 }
 
 func setup(b []uint8) dcdSetup {
-	if len(b) >= 8 {
+	if len(b) >= dcdSetupSize {
 		return dcdSetup{
 			bmRequestType: b[0],
 			bRequest:      b[1],
@@ -140,16 +140,12 @@ const (
 )
 
 func (d *dcd) event(ev dcdEvent) {
-
 	switch ev.id {
 	case dcdEventInvalid:
 	case dcdEventStatusReset:
-		d.endpointMask = 0
-
 	case dcdEventPeripheralReady:
 		// Configure and enable control endpoint 0
 		d.endpointEnable(0, true, 0)
-
 	case dcdEventStatusRun:
 	case dcdEventStatusSuspend:
 	case dcdEventStatusError:
@@ -165,7 +161,6 @@ func (d *dcd) event(ev dcdEvent) {
 		case dcdStageStall:
 			d.controlStall()
 		}
-
 	case dcdEventTransactComplete:
 	case dcdEventTimer:
 	default:
@@ -187,9 +182,6 @@ const (
 
 // controlSetup handles setup messages on control endpoint 0.
 func (d *dcd) controlSetup(sup dcdSetup) dcdStage {
-
-	// Reset endpoint 0 notify mask
-	d.controlMask = 0
 
 	// First, switch on the type of request (standard, class, or vendor)
 	switch sup.bmRequestType & descRequestTypeTypeMsk {
@@ -551,10 +543,7 @@ func (d *dcd) controlSetup(sup dcdSetup) dcdStage {
 }
 
 // controlComplete handles the setup completion of control endpoint 0.
-func (d *dcd) controlComplete(status uint32) {
-
-	// Reset endpoint 0 notify mask
-	d.controlMask = 0
+func (d *dcd) controlComplete() {
 
 	// First, switch on the type of request (standard, class, or vendor)
 	switch d.setup.bmRequestType & descRequestTypeTypeMsk {

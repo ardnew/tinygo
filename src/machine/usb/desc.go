@@ -2,7 +2,7 @@ package usb
 
 const descUSBSpecVersion = uint16(0x0200) // USB 2.0
 
-const descLanguageEnglish = uint16(0x0409)
+const descLanguageEnglish = uint16(0x0409) // (US) English
 
 // USB constants defined per specification.
 const (
@@ -153,7 +153,7 @@ func (s Speed) device() uint32 {
 }
 
 const (
-	// Attributes of all endpoint descriptor configurations.
+	// Common attributes for all endpoint descriptor configurations.
 	descEndptConfigAttr = descConfigAttrD7Msk | // Bit 7: reserved (1)
 		(0 << descConfigAttrSelfPoweredPos) | // Bit 6: self-powered
 		(0 << descConfigAttrRemoteWakeupPos) | // Bit 5: remote wakeup

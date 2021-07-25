@@ -5,6 +5,18 @@ package runtime
 // This file implements the common types and operations available when running
 // in either the Cortex-M7 or Cortex-M4 context.
 
+// A robust hardware abstraction layer (HAL) is implemented to manage system
+// oscillators and PLLs. This HAL interface can be found in the stm32 device
+// package at device/stm32/stm32h7x5_cmx_rcc.go. Despite the name, which is
+// a result of the SVD used to build register descriptions, this source file
+// supports the RCC peripheral in both STM32H7x5 and STM32H7x7.
+//
+// The main PLL and various system bus frequencies for this specific target
+// are configured in runtime/runtime_stm32h7x5_cm7.go, since the Cortex-M7
+// core is configured as the initialization driver. The godoc comment above
+// func initCoreFreq() provides a table of frequencies for each system bus
+// and the peripheral block(s) they drive.
+
 import (
 	"device/stm32"
 	"runtime/volatile"
