@@ -2,32 +2,36 @@
 
 package runtime
 
-import "device/arm"
+import (
+	"device/arm"
+	"machine"
+)
 
-// +-------------+-----------+
-// |   SYSCLK    |  480 MHz  |  <-  M7 CPU, M7 SysTick
-// |   AHBCLK    |  240 MHz  |  <-  M4 CPU, M4 SysTick, AXI Periphs
-// |  APB1CLK    |  120 MHz  |  <-  APB1 Periphs
-// |  APB1CLK(*) |  240 MHz  |  <-  APB1 xTIMs
-// |  APB2CLK    |  120 MHz  |  <-  APB2 Periphs
-// |  APB2CLK(*) |  240 MHz  |  <-  APB2 xTIMs
-// |  APB3CLK    |  120 MHz  |  <-  APB3 Periphs
-// |  APB4CLK    |  120 MHz  |  <-  APB4 Periphs, APB4 xTIMs
-// |  AHB4CLK    |  240 MHz  |  <-  AHB4 Periphs
-// +-------------+-----------+
-
-// The HSE frequency is derived from STM32H7 Nucleo(s) and Arduino Portenta H7,
-// but it may not be the same on every device with an STM32H7.
-
-// +---------+----------+
-// |    HSE  |  25 MHz  | High-speed  (External)
-// |    LSE  |  32 kHz  | Low-speed   (External)
-// |    HSI  |  64 MHz  | High-speed  (Internal)
-// |    CSI  |   4 MHz  | Low-power   (Internal)
-// |    LSI  |  32 kHz  | Low-speed   (Internal)
-// +---------+----------+
-// |  HSI48  |  48 MHz  | <- USB PHY
-// +---------+----------+
+// In addition to 3x separate PLLs (with on-the-fly fractional divisors), the
+// STM32H7 supports several different oscillators:
+//
+//   * 2x external oscillators
+//     – High-speed external oscillator (HSE), for 4-48 MHz crystals
+//     – Low-speed external oscillator (LSE), for 32 kHz crystals
+//   * 4x internal oscillators
+//     – High-speed internal oscillator (HSI)
+//     – 48 MHz RC oscillator (HSI48)
+//     – Low-power internal oscillator (CSI)
+//     – Low-speed internal oscillator (LSI)
+//
+// The frequency of each of these oscillators is shown below:
+//
+//     +---------+----------+
+//     | (*)HSE  |  25 MHz  |  =>  High-speed  (External)
+//     |    LSE  |  32 kHz  |  =>  Low-speed   (External)
+//     |    HSI  |  64 MHz  |  =>  High-speed  (Internal)
+//     |  HSI48  |  48 MHz  |  =>  USB PHY     (Internal)
+//     |    CSI  |   4 MHz  |  =>  Low-power   (Internal)
+//     |    LSI  |  32 kHz  |  =>  Low-speed   (Internal)
+//     +---------+----------+
+//
+// (*) The HSE frequency is derived from STM32H7 Nucleo(s) and Arduino Portenta
+//     H7, but it may not be the same on every device with an STM32H7.
 
 type timeUnit int64
 
@@ -119,4 +123,6 @@ func waitForEvents() {
 	arm.Asm("wfe")
 }
 
-func putchar(c byte) {}
+func putchar(c byte) {
+	machine.UART0.WriteByte(c) // print to USB UART
+}

@@ -236,6 +236,8 @@ func (d *dhw) interrupt() {
 			// wait for flush to complete
 			for d.bus.ENDPTFLUSH.HasBits(0x00010001) {
 			}
+			// Reset notify mask for control endpoint 0
+			d.controlMask = 0
 			// Notify device controller driver
 			d.event(dcdEvent{
 				id:    dcdEventControlSetup,
@@ -248,7 +250,11 @@ func (d *dhw) interrupt() {
 		if 0 != completeStatus {
 			d.bus.ENDPTCOMPLETE.Set(completeStatus)
 			if 0 != completeStatus&d.controlMask {
-				d.controlComplete(completeStatus)
+				// Clear notify mask for control endpoint 0
+				d.controlMask = 0
+				// Notify device controller driver, which invokes any appropriate
+				// callback(s) for the current device class configuration.
+				d.controlComplete()
 			}
 			completeStatus &= d.endpointMask
 			if 0 != completeStatus {
@@ -289,6 +295,7 @@ func (d *dhw) interrupt() {
 		}
 		d.bus.ENDPTFLUSH.Set(0xFFFFFFFF)
 		d.event(dcdEvent{id: dcdEventStatusReset})
+		d.endpointMask = 0
 	}
 
 	// General Purpose Timer Interrupt 0(GPTINT0) - R/WC

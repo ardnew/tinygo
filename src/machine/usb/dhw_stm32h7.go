@@ -11,6 +11,11 @@ import (
 	"runtime/interrupt"
 )
 
+const (
+	dhwDataQueueSize     = 1024 // Must be a power of 2
+	dhwTransferQueueSize = 64   // Must be a power of 2
+)
+
 //   +-- [ NOTE ] --------------------------------------------------------+
 //   |                                                                    |
 //   |  Often you will see suffixes "HS" and "FS" when referring to core  |
@@ -143,4 +148,127 @@ func (d *dhw) enableClocks(enable bool) {
 		stm32.RCC.AHB1RSTR.ClearBits(resetMask)
 		udelay(1000) // Delay 1 ms for clock reset
 	}
+}
+
+// dhwTimerClass provides an abstraction for using one of the STM32 xTIM timer
+// peripherals with the device class timer type dhwTimer.
+//
+// We use one of the low-power timers (LPTIMx) for class polling, since we need
+// only minimal capabilities: input clock selection (with prescalar), 16-bit
+// counter, and interrupt on match/overflow. This type of timer can also be used
+// to wake the system from various low-power modes, which might prove useful.
+type dhwTimerClass stm32.LPTIM_Type
+
+// uartTimer defines the specific timer peripheral (LPTIM1) used by the CDC-ACM
+// (single) device class driver. It is embedded in an instance of dhwTimer, our
+// timer peripheral abstraction/container.
+//
+// The purpose of this timer is to flush UART transmit (Tx) data buffered in the
+// application's circular queue into the respective USB bulk data endpoint's
+// transmit FIFO at regular intervals. This timer-based flushing enables the
+// device class driver to better schedule transfers and ensure FIFO overrun
+// never occurs.
+var uartTimer = &dhwTimer{
+	dhwTimerClass: (*dhwTimerClass)(stm32.LPTIM1),
+}
+
+func (t *dhwTimer) valid() bool { return nil != t && nil != t.dhwTimerClass }
+func (t *dhwTimer) ready() bool { return t.valid() && t.configured }
+
+func (t *dhwTimer) configure(config dhwTimerConfig) *dhwTimer {
+
+	if !t.valid() {
+		return nil
+	}
+	if t.ready() {
+		t.reset()
+		return t
+	}
+
+	// LPTIM1 timer settings:
+	//   clock source    = PER[HSI] (64 MHz)
+	//   clock prescaler = DIV64 (-> 1 MHz timer)
+	//   trigger source  = software
+	//   update mode     = immediate
+	//   counter source  = internal
+	t.CR.Set(0)
+	t.CFGR.Set(stm32.LPTIM_CFGR_PRESC_Div64 << stm32.LPTIM_CFGR_PRESC_Pos)
+	t.CFGR2.Set(0)
+	// interrupt on counter match value in auto-reload register (ARR)
+	t.IER.Set(stm32.LPTIM_IER_ARRMIE)
+	// enable LPTIM module
+	t.CR.Set(stm32.LPTIM_CR_ENABLE)
+	// LPTIM is only a 16-bit timer. Since we have scaled the timer frequency to
+	// 1 MHz (1 tick/us), the reload register (ARR) conveniently specifies the
+	// overflow/interrupt period in terms of microseconds. However, the 16-bit
+	// limit means the maximum period is 65.536 milliseconds.
+	if config.period > 0xFFFF {
+		config.period = 0xFFFF
+	}
+	t.ARR.Set(config.period - 1)
+
+	// We must manually test which device controllers to invoke interrupt for,
+	// because it isn't possible to create different interrupt handlers with the
+	// same IRQ. All interrupt handlers defined on the IRQ anywhere in source
+	// code, regardless if interrupt.New was actually called or not, will in fact
+	// be called when any one of them is called. This is an unintuitive TinyGo
+	// design constraint.
+	switch t {
+	case uartTimer:
+		t.irq = interrupt.New(stm32.IRQ_LPTIM1,
+			func(interrupt.Interrupt) {
+				for _, core := range coreInstance {
+					if nil != core.dc {
+						core.dc.interruptEnable(false)
+						core.dc.tim.clearInterrupts()
+
+						switch core.dc.cc.id {
+						case classDeviceCDCACM:
+							core.dc.uartTransmit()
+						case classDeviceHID:
+						}
+
+						core.dc.interruptEnable(true)
+					}
+				}
+			})
+	}
+
+	// Initialize LPTIM interrupt with lower priority than USB interrupt.
+	t.irq.SetPriority(config.priority)
+	// Reset counter and enable interrupt
+	t.reset()
+	// Enable continuous mode to actually start counting
+	t.CR.SetBits(stm32.LPTIM_CR_CNTSTRT)
+
+	t.configured = true
+	return t
+}
+
+func (t *dhwTimer) clearInterrupts() {
+	if !t.valid() {
+		return
+	}
+	t.ICR.Set(stm32.LPTIM_ICR_ARROKCF | stm32.LPTIM_ICR_CMPOKCF |
+		stm32.LPTIM_ICR_ARRMCF | stm32.LPTIM_ICR_CMPMCF)
+}
+
+func (t *dhwTimer) reset() {
+	if !t.valid() {
+		return
+	}
+	t.irq.Disable()
+	// From user manual:
+	//  | Caution: COUNTRST must never be set to '1' by software before it is
+	//  | already cleared to '0' by hardware. Software should consequently check
+	//  | that COUNTRST bit is already cleared to '0' before attempting to set it
+	//  | to '1'.
+	cr := t.CR.Get()
+	if cr&stm32.LPTIM_CR_COUNTRST == 0 {
+		t.CR.Set(cr | stm32.LPTIM_CR_COUNTRST)
+		for t.CR.HasBits(stm32.LPTIM_CR_COUNTRST) {
+		} // wait for reset to complete
+	}
+	t.clearInterrupts()
+	t.irq.Enable()
 }

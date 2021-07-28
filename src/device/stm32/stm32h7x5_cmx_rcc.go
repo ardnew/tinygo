@@ -338,6 +338,9 @@ func (osc RCC_OSC_CFG_Type) Set() bool {
 
 	const revisionY = 0x1003 // STM32H7 revision Y
 
+	// Need to know currently-selected SYS/PLL source in case we are requesting it
+	// be reconfigured, that source will need to be bypassed using another OSC
+	// temporarily so that we don't jack with the system core clock.
 	sysSrc, pllSrc :=
 		(RCC.CFGR.Get()&RCC_CFGR_SWS_Msk)>>RCC_CFGR_SWS_Pos,
 		(RCC.PLLCKSELR.Get()&RCC_PLLCKSELR_PLLSRC_Msk)>>RCC_PLLCKSELR_PLLSRC_Pos
@@ -620,7 +623,7 @@ func (osc RCC_OSC_CFG_Type) Set() bool {
 		// Check if PLL is currently being used as source of SYSCLK.
 		if sysSrc != RCC_SYS_SRC_PLL1 {
 			// PLL is currently NOT source of SYSCLK.
-			// Check if we are requesting to enabled or disable PLL.
+			// Check if we are requesting to enable or disable PLL.
 			if osc.PLL1.PLL == RCC_PLL_ON {
 				// Enabling PLL ...
 				// First, disable PLL prior to reconfiguring
@@ -661,10 +664,13 @@ func (osc RCC_OSC_CFG_Type) Set() bool {
 					osc.PLL1.Div.VCO,
 					RCC_PLLCFGR_PLL1VCOSEL_Msk, 0)
 
+				// Enable the PLL divider outputs
 				RCC.PLLCFGR.SetBits((RCC_PLLCFGR_DIVP1EN))
 				RCC.PLLCFGR.SetBits((RCC_PLLCFGR_DIVQ1EN))
 				RCC.PLLCFGR.SetBits((RCC_PLLCFGR_DIVR1EN))
 				RCC.PLLCFGR.SetBits(RCC_PLLCFGR_PLL1FRACEN)
+
+				// Finally, switch on PLL and wait until ready
 				RCC.CR.SetBits(RCC_CR_PLL1ON)
 				start = ticks()
 				for !RCC_FLAG_PLLRDY.Get() {
@@ -687,6 +693,10 @@ func (osc RCC_OSC_CFG_Type) Set() bool {
 			}
 		} else {
 			// PLL is currently source of SYSCLK
+			// TBD: Probably should verify the PLL configuration currently set matches
+			// what was given, otherwise the PLL configuration needs to be updated.
+			// To update, you will first need to change the source of SYSCLK to one of
+			// the oscillators, and then change back to PLL after configuring.
 		}
 	}
 	return true
