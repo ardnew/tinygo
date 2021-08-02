@@ -109,4 +109,6 @@ func ticks() timeUnit { return timeUnit(tickCount.Get()) }
 //go:linkname ticks runtime.cycles
 func cycles() uint32 { return cycleCount.Get() }
 
-func sleepTicks(d timeUnit) {}
+func sleepTicks(d timeUnit) {
+	// TODO: Update this with a proper timer
+}

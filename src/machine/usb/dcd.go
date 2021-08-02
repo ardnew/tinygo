@@ -150,7 +150,11 @@ func (d *dcd) event(ev dcdEvent) {
 	case dcdEventStatusSuspend:
 	case dcdEventStatusError:
 	case dcdEventControlSetup:
-		// On control endpoint 0 setup events, the ev.setup field will be defined
+		// On control endpoint 0 setup events, the ev.setup field will be defined.
+		// If the setup processing overwrites the receiver's setup field, then it
+		// means an additional control transfer is needed after ACK handshaking has
+		// concluded.
+		d.setup = dcdSetup{}
 		d.stage = d.controlSetup(ev.setup)
 		switch d.stage {
 		case dcdStageSetup:
@@ -658,6 +662,9 @@ func (d *dcd) controlComplete() {
 	default:
 		// Unhandled request type
 	}
+
+	// Clear the setup packet after processing has finished.
+	d.setup = dcdSetup{}
 }
 
 func (d *dcd) controlDescriptorCDCACM(sup dcdSetup) {

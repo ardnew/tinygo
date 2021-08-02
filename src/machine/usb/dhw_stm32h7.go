@@ -150,32 +150,39 @@ func (d *dhw) enableClocks(enable bool) {
 	}
 }
 
-// dhwTimerClass provides an abstraction for using one of the STM32 xTIM timer
-// peripherals with the device class timer type dhwTimer.
-//
-// We use one of the low-power timers (LPTIMx) for class polling, since we need
-// only minimal capabilities: input clock selection (with prescalar), 16-bit
-// counter, and interrupt on match/overflow. This type of timer can also be used
-// to wake the system from various low-power modes, which might prove useful.
-type dhwTimerClass stm32.LPTIM_Type
-
-// uartTimer defines the specific timer peripheral (LPTIM1) used by the CDC-ACM
-// (single) device class driver. It is embedded in an instance of dhwTimer, our
-// timer peripheral abstraction/container.
-//
-// The purpose of this timer is to flush UART transmit (Tx) data buffered in the
-// application's circular queue into the respective USB bulk data endpoint's
-// transmit FIFO at regular intervals. This timer-based flushing enables the
-// device class driver to better schedule transfers and ensure FIFO overrun
-// never occurs.
-var uartTimer = &dhwTimer{
-	dhwTimerClass: (*dhwTimerClass)(stm32.LPTIM1),
+// microTickTimer provides an abstraction for using one of the STM32 xTIM timer
+// peripherals as a general purpose ticker (separate from the core's SysTick
+// timer). The timer frequency is fixed at 1 MHz (1 tick/microsec).
+type microTickTimer struct {
+	*microTickBus
+	irq        interrupt.Interrupt
+	tick       func()
+	configured bool
 }
 
-func (t *dhwTimer) valid() bool { return nil != t && nil != t.dhwTimerClass }
-func (t *dhwTimer) ready() bool { return t.valid() && t.configured }
+type microTickConfig struct {
+	period   uint32
+	priority uint8
+	tick     func()
+}
 
-func (t *dhwTimer) configure(config dhwTimerConfig) *dhwTimer {
+// microTickBus defines the hardware peripheral type used by microTickTimer.
+//
+// We use one of the low-power timers (LPTIMx), because we need only minimal
+// capabilities: input clock selection (with prescalar), 16-bit counter, and
+// interrupt on match/overflow. This type of timer can also be used to wake the
+// system from various low-power modes, which might prove useful.
+//
+// Since the overflow counter is 16-bit, the longest tick period that can be
+// generated is 65.536 millisecs.
+type microTickBus stm32.LPTIM_Type
+
+var microTick = &microTickTimer{microTickBus: (*microTickBus)(stm32.LPTIM1)}
+
+func (t *microTickTimer) valid() bool { return nil != t && nil != t.microTickBus }
+func (t *microTickTimer) ready() bool { return t.valid() && t.configured }
+
+func (t *microTickTimer) configure(config microTickConfig) *microTickTimer {
 
 	if !t.valid() {
 		return nil
@@ -198,43 +205,24 @@ func (t *dhwTimer) configure(config dhwTimerConfig) *dhwTimer {
 	t.IER.Set(stm32.LPTIM_IER_ARRMIE)
 	// enable LPTIM module
 	t.CR.Set(stm32.LPTIM_CR_ENABLE)
-	// LPTIM is only a 16-bit timer. Since we have scaled the timer frequency to
-	// 1 MHz (1 tick/us), the reload register (ARR) conveniently specifies the
-	// overflow/interrupt period in terms of microseconds. However, the 16-bit
-	// limit means the maximum period is 65.536 milliseconds.
+
 	if config.period > 0xFFFF {
 		config.period = 0xFFFF
 	}
 	t.ARR.Set(config.period - 1)
 
-	// We must manually test which device controllers to invoke interrupt for,
-	// because it isn't possible to create different interrupt handlers with the
-	// same IRQ. All interrupt handlers defined on the IRQ anywhere in source
-	// code, regardless if interrupt.New was actually called or not, will in fact
-	// be called when any one of them is called. This is an unintuitive TinyGo
-	// design constraint.
+	t.tick = config.tick
+
 	switch t {
-	case uartTimer:
+	case microTick:
 		t.irq = interrupt.New(stm32.IRQ_LPTIM1,
 			func(interrupt.Interrupt) {
-				for _, core := range coreInstance {
-					if nil != core.dc {
-						core.dc.interruptEnable(false)
-						core.dc.tim.clearInterrupts()
-
-						switch core.dc.cc.id {
-						case classDeviceCDCACM:
-							core.dc.uartTransmit()
-						case classDeviceHID:
-						}
-
-						core.dc.interruptEnable(true)
-					}
+				if nil != microTick.tick {
+					microTick.tick()
 				}
 			})
 	}
 
-	// Initialize LPTIM interrupt with lower priority than USB interrupt.
 	t.irq.SetPriority(config.priority)
 	// Reset counter and enable interrupt
 	t.reset()
@@ -245,7 +233,7 @@ func (t *dhwTimer) configure(config dhwTimerConfig) *dhwTimer {
 	return t
 }
 
-func (t *dhwTimer) clearInterrupts() {
+func (t *microTickTimer) clearInterrupts() {
 	if !t.valid() {
 		return
 	}
@@ -253,7 +241,7 @@ func (t *dhwTimer) clearInterrupts() {
 		stm32.LPTIM_ICR_ARRMCF | stm32.LPTIM_ICR_CMPMCF)
 }
 
-func (t *dhwTimer) reset() {
+func (t *microTickTimer) reset() {
 	if !t.valid() {
 		return
 	}

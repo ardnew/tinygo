@@ -122,6 +122,14 @@ const (
 	descHIDJoystickTxHSPacketSize = 12 //  (high-speed)
 )
 
+type descCDCACMTerminal int
+
+const (
+	descCDCACMTerminalDisconnected descCDCACMTerminal = iota
+	descCDCACMTerminalConnected
+	descCDCACMTerminalReady
+)
+
 // descCDCACM0EP is the buffer of all endpoint state/information objects for the
 // default CDC-ACM (single) device class configuration (index 1).
 //
@@ -167,6 +175,12 @@ var descCDCACM0Rq [dhwDataQueueSize]uint8
 //go:align 32
 var descCDCACM0Tq [dhwDataQueueSize]uint8
 
+// descCDCACM0Ts is the transfer ring buffer used to schedule transmit (Tx) data
+// transfers on the bulk IN endpoint for the default CDC-ACM (single) device
+// class configuration (index 1).
+//go:align 32
+//var descCDCACM0Xq [dhwTransferQueueSize]*dhwTransfer
+
 // descCDCACMClassData holds the buffers and control states for all CDC-ACM
 // (single) device class configurations, ordered by index (offset by -1), for
 // STM32 targets only.
@@ -195,8 +209,12 @@ type descCDCACMClassData struct {
 	rq dhwDataQueue // bulk data endpoint Rx (OUT) to UART serialization queue
 	tq dhwDataQueue // bulk data endpoint Tx (IN) from UART serialization queue
 
+	//xq dhwTransferQueue // bulk data endpoint Tx (IN) transfer queue
+
 	rxSize uint16
 	txSize uint16
+
+	state descCDCACMTerminal
 }
 
 // descCDCACMData holds statically-allocated instances for each of the target-
@@ -232,6 +250,12 @@ var descCDCACMData = [dcdCount]descCDCACMClassData{
 			head: &volatile.Register32{},
 			tail: &volatile.Register32{},
 		},
+
+		//xq: dhwTransferQueue{ // bulk data endpoint Tx (IN) transfer queue
+		//	fifo: &descCDCACM0Ts,
+		//	head: &volatile.Register32{},
+		//	tail: &volatile.Register32{},
+		//},
 
 		rxSize: descCDCACMDataRxPacketSize,
 		txSize: descCDCACMDataTxPacketSize,

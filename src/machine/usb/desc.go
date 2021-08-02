@@ -161,8 +161,8 @@ const (
 
 	descEndptConfigAttrRxPos = 0
 	descEndptConfigAttrTxPos = 16
-	descEndptConfigAttrRxMsk = (descEndptConfigAttr | descEndptAttrSyncTypeMsk) << descEndptConfigAttrRxPos
-	descEndptConfigAttrTxMsk = (descEndptConfigAttr | descEndptAttrSyncTypeMsk) << descEndptConfigAttrTxPos
+	descEndptConfigAttrRxMsk = (descEndptAttrSyncTypeMsk | descEndptConfigAttr) << descEndptConfigAttrRxPos
+	descEndptConfigAttrTxMsk = (descEndptAttrSyncTypeMsk | descEndptConfigAttr) << descEndptConfigAttrTxPos
 
 	descEndptConfigAttrRxUnused      = 0x02 << descEndptConfigAttrRxPos
 	descEndptConfigAttrTxUnused      = 0x02 << descEndptConfigAttrTxPos
@@ -455,6 +455,9 @@ const (
 type descCDCACMClass struct {
 	*descCDCACMClassData // Target-defined, class-specific data
 
+	line descCDCACMLineCoding
+	term struct{ dtr, rts bool }
+
 	locale *[descCDCACMLanguageCount]descStringLanguage // string descriptors
 	device *[descLengthDevice]uint8                     // device descriptor
 	qualif *[descLengthQualification]uint8              // device qualification descriptor
@@ -538,7 +541,7 @@ var descCDCACM = [dcdCount]descCDCACMClass{
 			1,                         // Number of endpoints
 			descCDCTypeComm,           // Class code
 			descCDCSubAbstractControl, // Subclass code
-			descCDCProtoAT250,         // Protocol code (NOTE: Teensyduino & Arduino-Mbed define this as 1 [AT V.250])
+			descCDCProtoNone,          // Protocol code (NOTE: Teensyduino & Arduino-Mbed define this as 1 [AT V.250])
 			0,                         // Interface Description String Index
 
 			// CDC Header Functional Descriptor

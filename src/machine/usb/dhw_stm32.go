@@ -39,8 +39,6 @@ type dhw struct {
 
 	irq interrupt.Interrupt // USB system interrupt
 
-	tim *dhwTimer // USB timer interrupt
-
 	state dhwState // State of the dhw's USB state machine
 	stage dcdStage // USB transmission stage
 
@@ -357,10 +355,10 @@ func (d *dhw) enable(enable bool) {
 		// Enable controller's global interrupt
 		d.glo.GAHBCFG.SetBits(stm32.USB_GAHBCFG_GINT)
 		// Enable USB interrupts
-		d.interruptEnable(true)
+		d.irq.Enable()
 	} else {
 		// Disable USB interrupts
-		d.interruptEnable(false)
+		d.irq.Disable()
 		// Disable controller's global interrupt
 		d.glo.GAHBCFG.ClearBits(stm32.USB_GAHBCFG_GINT)
 		// Disable pullup/pulldown
@@ -377,7 +375,7 @@ func (d *dhw) enableSOF(enable bool, iface uint8) {}
 // interrupt handles the USB hardware interrupt events and notifies the device
 // controller driver using a common "virtual interrupt" code.
 func (d *dhw) interrupt() {
-	d.interruptEnable(false)
+	d.irq.Disable()
 
 	// Bit 1 MMIS: Mode mismatch interrupt
 	//   The core sets this bit when the application is trying to access:
@@ -428,7 +426,7 @@ func (d *dhw) interrupt() {
 			// buffer declared by current device class configuration).
 			case statusDataReceived:
 				if z > 0 {
-					d.endpointRead(n, ep.zfer.data, z)
+					d.endpointRead(n, ep.xfer.data, z)
 				}
 			// SETUP data received by USB core and placed in Rx FIFO. Call
 			// endpointRead to drain the FIFO and decode it as a dcdSetup structure,
@@ -438,7 +436,14 @@ func (d *dhw) interrupt() {
 			// bit in the endpoint status register of control endpoint 0.
 			case statusSetupReceived:
 				// Read 8 bytes from control endpoint 0 Rx FIFO
-				d.endpointRead(n, d.controlBuffer(0), z)
+				d.endpointRead(n, d.controlBuffer(0), dcdSetupSize)
+				// Once (*dcd).event is called, passing this setup packet is argument,
+				// the receiver's setup field (set here) is cleared. If the receiver's
+				// setup field is populated again after (*dcd).event has completed, it
+				// means an additional control transfer is being requested (e.g., for
+				// [CDC-ACM]SET_LINE_CODING, [HID]SET_REPORT, etc.). This control
+				// transfer is initiated on the next transfer complete (XFRC) interrupt
+				// of control endpoint 0.
 				d.setup = setupFrom(d.controlBuffer(0))
 			}
 			d.glo.GINTMSK.SetBits(stm32.USB_GINTMSK_RXFLVLM)
@@ -469,23 +474,21 @@ func (d *dhw) interrupt() {
 				e := d.glo.OutEp(num)
 				// The interrupt status for this individual OUT endpoint
 				s := e.DOEPINT.Get() & d.dev.DOEPMSK.Get()
-				x := d.endpointInfo(n).zfer
+				x := d.endpointInfo(n).xfer
 
 				// OUT transfer complete
 				if stm32.USB_DOEPINT_XFRC == s&stm32.USB_DOEPINT_XFRC {
 					e.DOEPINT.Set(stm32.USB_DOEPINT_XFRC)
-					if nil != x {
-						x.active = false
-					}
 					// Handle control transfers and data endpoints separately
 					if 0 == num {
-						d.controlComplete()
-						if nil == x || 0 == x.len {
-							d.endpointEnable(0, true, 0)
+						if 0 == d.setup.bmRequestType {
+							d.controlComplete()
+						} else {
+							d.dcd.controlComplete()
 						}
 					} else {
 						// Notify upper-layer device class driver and event handlers.
-						if nil != x && nil != x.complete {
+						if nil != x.complete {
 							x.complete()
 						}
 					}
@@ -500,9 +503,6 @@ func (d *dhw) interrupt() {
 							id:    dcdEventControlSetup,
 							setup: d.setup,
 						})
-						if nil != x {
-							x.active = false
-						}
 						d.controlComplete()
 					}
 				}
@@ -546,23 +546,32 @@ func (d *dhw) interrupt() {
 				s := e.DIEPINT.Get() & (d.dev.DIEPMSK.Get() |
 					(((d.dev.DIEPEMPMSK.Get() >> num) & 0x1) <<
 						descEndptAddrDirectionPos))
-				x := d.endpointInfo(n).zfer
+				x := d.endpointInfo(n).xfer
 
 				// IN transfer complete
 				if stm32.USB_DIEPINT_XFRC == s&stm32.USB_DIEPINT_XFRC {
 					e.DIEPINT.Set(stm32.USB_DIEPINT_XFRC)
 					// Disable Tx FIFO empty interrupt if still set for some reason.
 					d.dev.DIEPEMPMSK.ClearBits(1 << num)
-					if nil != x {
-						x.active = false
-					}
 					// Handle control transfers and data endpoints separately
 					if 0 == num {
-						d.controlComplete()
+						if 0 == d.setup.bmRequestType {
+							d.controlComplete()
+						} else {
+							d.dcd.controlComplete()
+						}
 					} else {
 						// Notify upper-layer device class driver and event handlers.
-						if nil != x && nil != x.complete {
+						if nil != x.complete {
 							x.complete()
+						}
+						// Save a pointer to the next incomplete transfer.
+						next := x.next
+						// Discard our completed transfer.
+						d.endpointInfo(n).xfer = nil
+						// If another transfer was in the queue, initiate transmission.
+						if nil != next {
+							d.endpointTransmit(n, next)
 						}
 					}
 				}
@@ -581,7 +590,7 @@ func (d *dhw) interrupt() {
 				// IN transmit FIFO empty, ready to send any buffered data stored on
 				// this endpoint.
 				if stm32.USB_DIEPINT_TXFE == s&stm32.USB_DIEPINT_TXFE {
-					if nil != x && 0 != x.data && 0 != x.len {
+					if nil != x && 0 != x.data && 0 != x.size {
 						// Tx FIFO empty interrupt is unmasked only when the respective
 						// endpoint has requested a transmission. We can now write its data
 						// from memory to the empty FIFO. Afterwards, if all data has been
@@ -602,8 +611,6 @@ func (d *dhw) interrupt() {
 							// Disable Tx FIFO empty interrupt once all data has transmitted
 							// (or no data exists in transmit buffer)
 							d.dev.DIEPEMPMSK.ClearBits(1 << num)
-							// Clear the endpoint transfer info
-							x.data, x.len, x.count, x.active = 0, 0, 0, false
 						}
 					}
 				}
@@ -790,21 +797,7 @@ func (d *dhw) interrupt() {
 	if status := d.glo.GINTSTS.Get(); status&stm32.USB_GINTSTS_OTGINT != 0 {
 	}
 
-	d.interruptEnable(true)
-}
-
-func (d *dhw) interruptEnable(enable bool) {
-	if enable {
-		d.irq.Enable()
-		if nil != d.tim {
-			d.tim.irq.Enable()
-		}
-	} else {
-		d.irq.Disable()
-		if nil != d.tim {
-			d.tim.irq.Disable()
-		}
-	}
+	d.irq.Enable()
 }
 
 func (d *dhw) setDeviceAddress(addr uint16) {
@@ -911,6 +904,9 @@ func (d *dhw) controlStall() {
 // current stage.
 func (d *dhw) controlComplete() {
 	switch d.stage {
+	case dcdStageSetup:
+		// Control transfers complete, ready for setup packet
+		d.endpointEnable(0, true, 0)
 	case dcdStageDataIn:
 		// data IN transfer complete, status stage, read ACK from host
 		d.stage = dcdStageStatusIn
@@ -921,6 +917,7 @@ func (d *dhw) controlComplete() {
 		d.controlTransmit(0, 0, false)
 	case dcdStageStatusIn, dcdStageStatusOut:
 		// status ACK already received, no action needed
+		d.stage = dcdStageSetup
 	default:
 		// invalid endpoint state, abort any transfers and stall
 		d.controlStall()
@@ -929,8 +926,7 @@ func (d *dhw) controlComplete() {
 
 // controlReceive receives (Rx, OUT) data on control endpoint 0.
 func (d *dhw) controlReceive(data uintptr, size uint32, notify bool) {
-
-	xfer := &dhwTransfer{data: data, len: size}
+	xfer := &dhwTransfer{data: data, size: size}
 	if notify {
 		xfer.complete = d.controlComplete
 	}
@@ -939,8 +935,7 @@ func (d *dhw) controlReceive(data uintptr, size uint32, notify bool) {
 
 // controlTransmit transmits (Tx, IN) data on control endpoint 0.
 func (d *dhw) controlTransmit(data uintptr, size uint32, notify bool) {
-
-	xfer := &dhwTransfer{data: data, len: size}
+	xfer := &dhwTransfer{data: data, size: size}
 	if notify {
 		xfer.complete = d.controlComplete
 	}
@@ -960,15 +955,54 @@ type dhwEndpoint struct {
 	kind  uint8        // Endpoint type
 	fifo  uint8        // Transmission FIFO number
 	resv  uint32       // Reserved size in FIFO
-	size  uint32       // Endpoint max packet size (bytes)
-	zfer  *dhwTransfer // Current transfer descriptor
+	used  uint32       // Current size of FIFO (bytes)
+	mps   uint32       // Endpoint max packet size (bytes)
+	xfer  *dhwTransfer // Current transfer descriptor
+}
+
+func (e *dhwEndpoint) tail() *dhwTransfer {
+	if nil == e.xfer {
+		return nil // no transfers scheduled, ready!
+	}
+	tail := e.xfer
+	for nil != tail.next {
+		tail = tail.next
+	}
+	return tail
+}
+
+func (e *dhwEndpoint) alloc(size uint32, origin uintptr) (offset uint32, pointer uintptr) {
+	// Check if any transfers are scheduled on this endpoint
+	if nil == e.xfer {
+		// Use the entire region, no transfers are occupying any space
+		return 0, origin
+	}
+	lo, hi := e.xfer.data, origin
+	p := e.xfer
+	for nil != p {
+		if origin <= p.data {
+			if lo > p.data {
+				lo = p.data
+			}
+			if top := p.data + uintptr(p.size); hi < top {
+				hi = top
+			}
+		}
+		p = p.next
+	}
+	// Check if we have sufficient space at the front of the buffer
+	if uint32(lo-origin) >= size {
+		return 0, origin
+	}
+	// Return the first block following all transfers in the buffer. The caller
+	// should make sure this doesn't point outside their buffer.
+	return uint32(hi - origin), hi
 }
 
 type dhwTransfer struct {
 	data     uintptr      // Pointer to transfer buffer
-	len      uint32       // Total number of bytes in transfer
+	size     uint32       // Total number of bytes in transfer
 	count    uint32       // Number of bytes transferred
-	active   bool         // Transfer is currently being processed by scheduler
 	complete func()       // Callback invoked when transfer completes
 	next     *dhwTransfer // Next transfer to perform after completion
 }
@@ -1016,14 +1050,15 @@ func (d *dhw) endpointAlloc(endpoint, kind uint8, reserved, size uint32) {
 
 	// Initialize endpoint state info buffer
 	*d.endpointInfo(endpoint) = dhwEndpoint{
-		num:   num,            // Endpoint number
-		isTx:  isTx,           // Endpoint direction (is IN endpoint)
-		stall: false,          // Endpoint stall condition
-		kind:  kind,           // Endpoint type
-		fifo:  fifo,           // Transmission FIFO number
-		resv:  reserved,       // Reserved size in FIFO
-		size:  size,           // Endpoint max packet size (bytes)
-		zfer:  &dhwTransfer{}, // Current transfer descriptor
+		num:   num,      // Endpoint number
+		isTx:  isTx,     // Endpoint direction (is IN endpoint)
+		stall: false,    // Endpoint stall condition
+		kind:  kind,     // Endpoint type
+		fifo:  fifo,     // Transmission FIFO number
+		resv:  reserved, // Reserved size in FIFO
+		used:  0,        // Current size of FIFO (bytes)
+		mps:   size,     // Endpoint max packet size (bytes)
+		xfer:  nil,      // Current transfer descriptor
 	}
 }
 
@@ -1144,7 +1179,7 @@ func (d *dhw) endpointEnable(endpoint uint8, control bool, config uint32) {
 			e := d.glo.OutEp(int(num))
 			d.dev.DAINTMSK.SetBits(stm32.USB_DAINTMSK_OEPM & ((1 << num) << 16))
 			if !e.DOEPCTL.HasBits(stm32.USB_DOEPCTL_USBAEP) {
-				e.DOEPCTL.SetBits((ep.size & stm32.USB_DOEPCTL_MPSIZ) |
+				e.DOEPCTL.SetBits((ep.mps & stm32.USB_DOEPCTL_MPSIZ) |
 					(uint32(ep.kind) << stm32.USB_DOEPCTL_EPTYP_Pos) |
 					stm32.USB_DIEPCTL_SD0PID_SEVNFRM | stm32.USB_DOEPCTL_USBAEP)
 			}
@@ -1152,7 +1187,7 @@ func (d *dhw) endpointEnable(endpoint uint8, control bool, config uint32) {
 			e := d.glo.InEp(int(num))
 			d.dev.DAINTMSK.SetBits(stm32.USB_DAINTMSK_IEPM & (1 << num))
 			if !e.DIEPCTL.HasBits(stm32.USB_DIEPCTL_USBAEP) {
-				e.DIEPCTL.SetBits((ep.size & stm32.USB_DIEPCTL_MPSIZ) |
+				e.DIEPCTL.SetBits((ep.mps & stm32.USB_DIEPCTL_MPSIZ) |
 					(uint32(ep.kind) << stm32.USB_DIEPCTL_EPTYP_Pos) |
 					(uint32(num) << stm32.USB_DIEPCTL_TXFNUM_Pos) |
 					stm32.USB_DIEPCTL_SD0PID_SEVNFRM | stm32.USB_DIEPCTL_USBAEP)
@@ -1296,71 +1331,70 @@ func (d *dhw) endpointSetFeature(endpoint uint8) {
 	}
 }
 
-// controlReceive receives (Rx, OUT) data on control endpoint 0.
 func (d *dhw) endpointReceive(endpoint uint8, xfer *dhwTransfer) {
 
-	ep := d.endpointInfo(rxEndpoint(uint8(endpoint)))
-	// if nil != ep.zfer && ep.zfer.active {
-	// 	return
-	// }
-	ep.zfer = xfer
-	ep.zfer.active = true
+	n := rxEndpoint(uint8(endpoint))
 
 	// For Rx (OUT) endpoints, we do not want the extra packet introduced when
 	// transfer size is a multiple of max packet size (i.e., size % mps = 0).
 	// The transfer size must be strictly greater than max packet size in order
 	// to request an additional packet; using (size - 1) ensures this strict
 	// inequality holds before performing the integer division.
-	ep.zfer.len &= stm32.USB_DOEPTSIZ_XFRSIZ_Msk >> stm32.USB_DOEPTSIZ_XFRSIZ_Pos
-	mps := d.endpointInfo(endpoint).size
-	pkt := uint32(1) + (ep.zfer.len-1)/mps
+	xfer.size &= stm32.USB_DOEPTSIZ_XFRSIZ_Msk >> stm32.USB_DOEPTSIZ_XFRSIZ_Pos
+	mps := d.endpointInfo(n).mps
+	pkt := uint32(1) + (xfer.size-1)/mps
 
 	// For Rx (OUT) packets, always prime the endpoint size register (DOEPTSIZ)
 	// with packets whose sizes are a multiple of max packet size, because we
 	// are receiving a full packet over the USB anyway. The number of ~packets~
 	// to receive, however, is based on the originally-requested transfer size.
-	ep.zfer.len = pkt * mps
+	xfer.size = pkt * mps
+
+	d.endpointInfo(n).xfer = xfer
 
 	// transfer size (XFRSIZ) represents the entire transfer size, not just the
 	// short packet remaining after 0 or more max-packet-sized packets (PKTCNT).
-	e := d.glo.OutEp(int(endpoint))
+	e := d.glo.OutEp(int(n))
 	e.DOEPTSIZ.Set((pkt << stm32.USB_DOEPTSIZ_PKTCNT_Pos) |
-		(ep.zfer.len << stm32.USB_DOEPTSIZ_XFRSIZ_Pos) | stm32.USB_DOEPTSIZ_STUPCNT)
+		(xfer.size << stm32.USB_DOEPTSIZ_XFRSIZ_Pos) | stm32.USB_DOEPTSIZ_STUPCNT)
 
 	e.DOEPCTL.ClearBits(stm32.USB_DOEPCTL_STALL)
 	e.DOEPCTL.SetBits(stm32.USB_DOEPCTL_CNAK | stm32.USB_DOEPCTL_EPENA)
 }
 
-// controlTransmit transmits (Tx, IN) data on control endpoint 0.
 func (d *dhw) endpointTransmit(endpoint uint8, xfer *dhwTransfer) {
 
-	ep := d.endpointInfo(txEndpoint(uint8(endpoint)))
-	// if nil != ep.zfer && ep.zfer.active {
-	// 	return
-	// }
-	ep.zfer = xfer
-	ep.zfer.active = true
+	n := txEndpoint(uint8(endpoint))
 
 	// If transfer size is a non-zero multiple of max packet size, the STM32
 	// core requires a separate zero-length packet be scheduled for transmission
 	// to complete the handshaking protocol. This extra packet is scheduled by
 	// always using pkt = 1 + size/mps (specifically when size % mps = 0).
-	ep.zfer.len &= stm32.USB_DIEPTSIZ_XFRSIZ_Msk >> stm32.USB_DIEPTSIZ_XFRSIZ_Pos
-	mps := ep.size
-	pkt := uint32(1) + ep.zfer.len/mps
+	xfer.size &= stm32.USB_DIEPTSIZ_XFRSIZ_Msk >> stm32.USB_DIEPTSIZ_XFRSIZ_Pos
+	mps := d.endpointInfo(n).mps
+	pkt := uint32(1) + xfer.size/mps
 
-	// transfer size (XFRSIZ) represents the entire transfer size, not just the
-	// short packet remaining after 0 or more max-packet-sized packets (PKTCNT).
-	e := d.glo.InEp(int(endpoint))
-	e.DIEPTSIZ.Set((pkt << stm32.USB_DIEPTSIZ_PKTCNT_Pos) |
-		(ep.zfer.len << stm32.USB_DIEPTSIZ_XFRSIZ_Pos))
+	d.endpointInfo(n).used += xfer.size
+
+	e := d.glo.InEp(int(n))
+	if txEndpoint(0) != n && d.endpointTransmitRemain(n) > 0 {
+		// There is an ongoing transfer on this endpoint.
+		// Queue the request at the end of its transmit schedule.
+		d.endpointInfo(n).tail().next = xfer
+	} else {
+		d.endpointInfo(n).xfer = xfer
+		// transfer size (XFRSIZ) represents the entire transfer size, not just the
+		// short packet remaining after 0 or more max-packet-sized packets (PKTCNT).
+		e.DIEPTSIZ.Set((pkt << stm32.USB_DIEPTSIZ_PKTCNT_Pos) |
+			(xfer.size << stm32.USB_DIEPTSIZ_XFRSIZ_Pos))
+	}
 
 	e.DIEPCTL.ClearBits(stm32.USB_DIEPCTL_STALL)
 	e.DIEPCTL.SetBits(stm32.USB_DIEPCTL_CNAK | stm32.USB_DIEPCTL_EPENA)
 
 	// Enable the FIFO empty interrupt for this endpoint if we are requesting a
 	// non-ZLP transfer.
-	if ep.zfer.len > 0 {
+	if xfer.size > 0 {
 		d.dev.DIEPEMPMSK.SetBits(1 << (endpoint & descEndptAddrNumberMsk))
 	}
 }
@@ -1373,16 +1407,16 @@ func (d *dhw) endpointTransmitAvail(endpoint uint8) uint32 {
 }
 
 // endpointTransmitRemain returns the number of bytes remaining for transmission
-// on the given endpoint's Tx FIFO. If the number of bytes remaining is greater
+// to the given endpoint's Tx FIFO. If the number of bytes remaining is greater
 // than the given endpoint's maximum packet size, returns maximum packet size.
 func (d *dhw) endpointTransmitRemain(endpoint uint8) uint32 {
 	ep := d.endpointInfo(txEndpoint(endpoint))
-	if nil == ep.zfer {
+	if nil == ep.xfer {
 		return 0
 	}
-	size := ep.zfer.len - ep.zfer.count
-	if size > ep.size {
-		size = ep.size
+	size := ep.xfer.size - ep.xfer.count
+	if size > ep.mps {
+		size = ep.mps
 	}
 	return size
 }
@@ -1392,7 +1426,7 @@ func (d *dhw) endpointTransmitRemain(endpoint uint8) uint32 {
 func (d *dhw) endpointRead(endpoint uint8, data uintptr, size uint32) {
 	// Normalize endpoint in case we only received an endpoint address number
 	n := rxEndpoint(endpoint)
-	if nil == d.endpointInfo(n).zfer {
+	if nil == d.endpointInfo(n).xfer {
 		return
 	}
 	fifo := d.glo.EpFifo(int(d.endpointInfo(n).fifo))
@@ -1408,8 +1442,10 @@ func (d *dhw) endpointRead(endpoint uint8, data uintptr, size uint32) {
 			*(*uint8)(unsafe.Pointer(data + i)) = u[i]
 		}
 	}
-	d.endpointInfo(n).zfer.data = end
-	d.endpointInfo(n).zfer.count += size
+	// Update the current data pointer and total bytes read counter in our
+	// endpoint transfer descriptor.
+	d.endpointInfo(n).xfer.data = end
+	d.endpointInfo(n).xfer.count += size
 }
 
 // endpointWrite writes a packet from the buffer referenced by the given data
@@ -1417,7 +1453,7 @@ func (d *dhw) endpointRead(endpoint uint8, data uintptr, size uint32) {
 func (d *dhw) endpointWrite(endpoint uint8, data uintptr, size uint32) {
 	// Normalize endpoint in case we only received an endpoint address number
 	n := txEndpoint(endpoint)
-	if nil == d.endpointInfo(n).zfer {
+	if nil == d.endpointInfo(n).xfer {
 		return
 	}
 	fifo := d.glo.EpFifo(int(d.endpointInfo(n).fifo))
@@ -1425,31 +1461,12 @@ func (d *dhw) endpointWrite(endpoint uint8, data uintptr, size uint32) {
 		fifo.Set(*(*uint32)(unsafe.Pointer(data)))
 		data += 4
 	}
-	d.endpointInfo(n).zfer.data += uintptr(size)
-	d.endpointInfo(n).zfer.count += size
+	// Update the current data pointer and total bytes written counter in our
+	// endpoint transfer descriptor.
+	d.endpointInfo(n).used -= size
+	d.endpointInfo(n).xfer.data += uintptr(size)
+	d.endpointInfo(n).xfer.count += size
 }
-
-// =============================================================================
-//  [CDC-ACM] Serial UART (Virtual COM Port)
-// =============================================================================
-
-// dhwTimer defines a general-purpose timer for USB device classes.
-type dhwTimer struct {
-	*dhwTimerClass
-	configured bool
-	irq        interrupt.Interrupt
-}
-
-// dhwTimerConfig contains the configuration parameters used to initialize a
-// device class timer.
-type dhwTimerConfig struct {
-	priority uint8  // interrupt priority (lower number => higher priority)
-	period   uint32 // 1/period (microseconds) = interrupt frequency (Hz)
-}
-
-// dhwTimerPriority defines the priority for USB device class timers, such as
-// the USB Serial (UART) Tx flush to FIFO poll.
-const dhwTimerPriority = 0xD0
 
 // =============================================================================
 //  [CDC-ACM] Serial UART (Virtual COM Port)
@@ -1457,7 +1474,6 @@ const dhwTimerPriority = 0xD0
 
 func (d *dhw) uartConfigure() {
 
-	d.state = dhwStateConfigure
 	acm := &descCDCACM[d.cc.config-1]
 
 	switch d.speed {
@@ -1469,26 +1485,38 @@ func (d *dhw) uartConfigure() {
 		acm.txSize = descCDCACMDataTxHSPacketSize
 	}
 
+	// We have finished processing SET_CONFIGURATION and now have an initialized
+	// USB device class.
+	d.state = dhwStateConfigure
+
 	d.endpointEnable(txEndpoint(descCDCACMEndpointStatus), false, 0)
 	d.endpointEnable(rxEndpoint(descCDCACMEndpointDataRx), false, 0)
 	d.endpointEnable(txEndpoint(descCDCACMEndpointDataTx), false, 0)
 
+	// This is the one and only dhwTransfer we allocate for UART Rx. Subsequent
+	// receptions will all reuse this descriptor in uartReceive.
 	d.endpointReceive(rxEndpoint(descCDCACMEndpointDataRx),
 		&dhwTransfer{
 			data:     d.uartRxBuffer(0),
-			len:      uint32(acm.rxSize),
+			size:     uint32(acm.rxSize),
 			complete: d.uartReceive,
 		})
 
-	// d.tim = uartTimer.configure(
-	// 	dhwTimerConfig{
-	// 		priority: dhwTimerPriority,
-	// 		period:   0xFFFF, // interrupt every 1 ms
-	// 	})
+	// microTick.configure(microTickConfig{
+	// 	period:   50 * 1000,
+	// 	priority: 0xD1,
+	// 	tick:     d.uartTransmit,
+	// })
 }
 
-func (d *dhw) uartReady() bool {
-	return d.state == dhwStateConfigure
+func (d *dhw) uartReady() (ok bool) {
+	d.irq.Disable()
+	// Ensure line coding and data terminal ready (DTR) have been received in the
+	// correct sequence.
+	ok = descCDCACM[d.cc.config-1].state == descCDCACMTerminalReady &&
+		d.stage == dcdStageSetup
+	d.irq.Enable()
+	return
 }
 
 // uartRxBuffer returns a pointer into the UART receive data (bulk OUT endpoint)
@@ -1524,61 +1552,94 @@ func (d *dhw) uartTxBuffer(offset int) uintptr {
 }
 
 func (d *dhw) uartSetLineState(dtr, rts bool) {
+	if d.state != dhwStateConfigure {
+		return
+	}
+	acm := &descCDCACM[d.cc.config-1]
+	acm.term.dtr = dtr
+	acm.term.rts = rts
+
+	// Take ACM out of ready state when receiving DTR. We must receive a line
+	// coding request _after_ terminal connection.
+	if acm.term.dtr {
+		acm.state = descCDCACMTerminalConnected
+	} else {
+		acm.state = descCDCACMTerminalDisconnected
+	}
 }
 
 func (d *dhw) uartSetLineCoding(coding descCDCACMLineCoding) {
+	if d.state != dhwStateConfigure {
+		return
+	}
+	acm := &descCDCACM[d.cc.config-1]
+	acm.line = coding
+
+	// Move into ready state only if we have received a DTR prior to this request.
+	if acm.term.dtr {
+		if 0 != acm.line.baud {
+			// We've received a DTR followed by a line coding request. Only in this
+			// sequence may we transition to ready.
+			acm.state = descCDCACMTerminalReady
+		} else {
+			acm.state = descCDCACMTerminalConnected
+		}
+	} else {
+		acm.state = descCDCACMTerminalDisconnected
+	}
 }
 
 func (d *dhw) uartReceive() {
-	if d.state != dhwStateConfigure {
-		return
+	if d.state == dhwStateConfigure {
+		// Slice Rx buffer up to number of bytes read from FIFO last transmission.
+		// The len field contains a multiple of the max packet size, but the count
+		// field contains the total number of bytes actually read from the Rx FIFO,
+		// which can accumulate across multiple packets in a single transfer.
+		ep := d.endpointInfo(rxEndpoint(descCDCACMEndpointDataRx))
+		acm := &descCDCACM[d.cc.config-1]
+
+		// Now fill UART ring buffer with as many bytes as we received. If there is
+		// insufficient space, we simply drop the extra bytes.
+		_ = acm.rq.put(acm.rx[:ep.xfer.count])
+
+		// Reuse our existing transfer descriptor, but reset its data pointer and
+		// byte counts.
+		ep.xfer.data = d.uartRxBuffer(0)
+		ep.xfer.count = 0
+
+		// Prepare for next packet reception
+		d.endpointReceive(rxEndpoint(descCDCACMEndpointDataRx), ep.xfer)
 	}
-
-	// Slice Rx buffer up to the number of bytes read from FIFO last transmission.
-	// The .len field contains a multiple of the bulk data packet size - 64 or 512
-	// bytes for full-speed or high-speed, respectively - but the .count field
-	// contains the total number of bytes actually read from the Rx FIFO, which
-	// can accumulate across multiple packets for a single transfer.
-	ep := d.endpointInfo(rxEndpoint(descCDCACMEndpointDataRx))
-	if nil == ep.zfer {
-		return
-	}
-
-	acm := &descCDCACM[d.cc.config-1]
-
-	// Now fill UART ring buffer with as many bytes as we received. If there is
-	// insufficient space, we simply drop the extra bytes.
-	_ = acm.rq.put(acm.rx[:ep.zfer.count])
-
-	// Prepare for next packet reception
-	d.endpointReceive(rxEndpoint(descCDCACMEndpointDataRx),
-		&dhwTransfer{
-			data:     d.uartRxBuffer(0),
-			len:      uint32(acm.rxSize),
-			complete: d.uartReceive,
-		})
 }
 
 func (d *dhw) uartTransmit() {
-	if d.state != dhwStateConfigure {
-		return
-	}
-	ep := d.endpointInfo(rxEndpoint(descCDCACMEndpointDataRx))
-	if nil == ep.zfer {
-		return
-	}
-	s := 0
-	if ep.zfer.active {
-		s += int(ep.zfer.len)
-	}
-	acm := &descCDCACM[d.cc.config-1]
-	if c := acm.tq.get(acm.tx[s:]); c > 0 {
-		d.endpointTransmit(txEndpoint(descCDCACMEndpointDataTx),
-			&dhwTransfer{
-				data:     d.uartTxBuffer(s),
-				len:      uint32(c),
-				complete: nil,
-			})
+	if d.state == dhwStateConfigure {
+		ep := d.endpointInfo(txEndpoint(descCDCACMEndpointDataTx))
+		acm := &descCDCACM[d.cc.config-1]
+		if n := acm.tq.available(); n > 0 {
+			for ep.xfer != nil && ep.xfer.count < ep.xfer.size {
+			}
+			if w := acm.tq.get(acm.tx[:]); w > 0 {
+				d.endpointTransmit(txEndpoint(descCDCACMEndpointDataTx),
+					&dhwTransfer{
+						data:     d.uartTxBuffer(0),
+						size:     uint32(w),
+						complete: nil,
+					})
+			}
+
+			// idx, ptr := ep.alloc(uint32(n), d.uartTxBuffer(0))
+			// if int(idx) < len(acm.tx) {
+			// 	if w := acm.tq.get(acm.tx[idx:]); w > 0 {
+			// 		d.endpointTransmit(txEndpoint(descCDCACMEndpointDataTx),
+			// 			&dhwTransfer{
+			// 				data:     ptr,
+			// 				size:     uint32(w),
+			// 				complete: nil,
+			// 			})
+			// 	}
+			// }
+		}
 	}
 }
 
@@ -1590,37 +1651,33 @@ func (d *dhw) uartAvailable() int {
 }
 
 func (d *dhw) uartReadByte() (uint8, bool) {
-	if d.state != dhwStateConfigure {
-		return 0, false
-	}
 	b := []uint8{0}
 	ok := d.uartRead(b) > 0
 	return b[0], ok
 }
 
-func (d *dhw) uartRead(data []uint8) int {
-	if d.state != dhwStateConfigure {
-		return 0
+func (d *dhw) uartRead(data []uint8) (count int) {
+	d.irq.Disable()
+	if d.state == dhwStateConfigure {
+		count = descCDCACM[d.cc.config-1].rq.get(data)
 	}
-	return descCDCACM[d.cc.config-1].rq.get(data)
+	d.irq.Enable()
+	return
 }
 
 func (d *dhw) uartWriteByte(c uint8) bool {
-	if d.state != dhwStateConfigure {
-		return false
-	}
 	return 1 == d.uartWrite([]uint8{c})
 }
 
-func (d *dhw) uartWrite(data []uint8) int {
-	if d.state != dhwStateConfigure {
-		return 0
+func (d *dhw) uartWrite(data []uint8) (count int) {
+	d.irq.Disable()
+	if d.state == dhwStateConfigure {
+		if count = descCDCACM[d.cc.config-1].tq.put(data); count > 0 {
+			d.uartTransmit()
+		}
 	}
-	if n := descCDCACM[d.cc.config-1].tq.put(data); n > 0 {
-		d.uartTransmit()
-		return n
-	}
-	return 0
+	d.irq.Enable()
+	return
 }
 
 func (d *dhw) uartSync() {
@@ -1787,8 +1844,8 @@ func (q *dhwDataQueue) get(data []uint8) int {
 	}
 
 	for i := uint32(0); i < less; i++ {
-		tail++
 		data[i] = q.fifo[tail%dhwDataQueueSize]
+		tail++
 	}
 	q.tail.Set(tail)
 
@@ -1815,8 +1872,8 @@ func (q *dhwDataQueue) put(data []uint8) int {
 	}
 
 	for i := uint32(0); i < more; i++ {
-		head++
 		q.fifo[head%dhwDataQueueSize] = data[i]
+		head++
 	}
 	q.head.Set(head)
 
