@@ -1,3 +1,4 @@
 /bin
 /dist
 /run.sh
+/go.sum
