@@ -220,7 +220,7 @@ vet: tidy $(SOURCES) $(METASOURCES)
 run: $(runsh)
 
 go.mod:
-	@$(go) mod init
+	@$(go) mod init "$(IMPORT)"
 
 $(outdir) $(pkgver) $(pkgver)/$(triple):
 	@$(test) -d "$(@)" || $(mkdir) "$(@)"
