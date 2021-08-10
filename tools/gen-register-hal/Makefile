@@ -4,7 +4,7 @@
 
 # Verify we have a valid GOPATH that physically exists.
 ifeq "" "$(strip $(wildcard $(GOPATH)))"
-$(error invalid GOPATH="$(GOPATH)")
+  $(error invalid GOPATH="$(GOPATH)")
 endif
 
 # Define which debugger to use (optional; disables optimizations).
@@ -14,13 +14,13 @@ DEBUG ?= gdb
 
 # Verify environment is suited for whichever debugger (if any) is selected.
 ifeq "gdb" "$(DEBUG)"
-# Go source code ships with a GDB Python extension that enables:
-#   -- Inspection of runtime internals (e.g., goroutines)
-#   -- Pretty-printing built-in types (e.g., map, slice, and channel)
-ifeq "" "$(GOROOT)"
-$(error invalid GOROOT="$(GOROOT)")
-endif
-GDBRTL ?= "$(wildcard $(GOROOT)/src/runtime/runtime-gdb.py)"
+  # Go source code ships with a GDB Python extension that enables:
+  #   -- Inspection of runtime internals (e.g., goroutines)
+  #   -- Pretty-printing built-in types (e.g., map, slice, and channel)
+  ifeq "" "$(GOROOT)"
+    $(error invalid GOROOT="$(GOROOT)")
+  endif
+  GDBRTL ?= "$(wildcard $(GOROOT)/src/runtime/runtime-gdb.py)"
 endif
 
 # +----------------------------------------------------------------------------+
@@ -31,15 +31,16 @@ PROJECT   ?= gen-register-hal
 IMPORT    ?= github.com/tinygo-org/tinygo/tools/$(PROJECT)
 VERSION   ?= 0.1.0
 BUILDTIME ?= $(shell date -u '+%FT%TZ')
-PLATFORM  ?= linux-amd64
+PLATFORM  ?= $(or $(shell go env GOOS),$(shell go env GOHOSTOS),linux)-$(or    \
+	$(shell go env GOARCH),$(shell go env GOHOSTARCH),amd64)
 
 # Determine Git branch and revision (if metadata exists).
 ifneq "" "$(wildcard $(GOPATH)/src/$(IMPORT)/.git)"
-# Verify we have the Git executable installed on our PATH.
-ifneq "" "$(shell which git)"
-BRANCH   ?= $(shell git symbolic-ref --short HEAD)
-REVISION ?= $(shell git rev-parse --short HEAD)
-endif
+  # Verify we have the Git executable installed on our PATH.
+  ifneq "" "$(shell which git)"
+    BRANCH   ?= $(shell git symbolic-ref --short HEAD)
+    REVISION ?= $(shell git rev-parse --short HEAD)
+  endif
 endif
 
 # Makefile identifiers to export (as strings) via Go linker. If the project is
@@ -57,11 +58,11 @@ EXPORTS ?= PROJECT IMPORT VERSION BUILDTIME PLATFORM \
 # making targets "build", "run", "install", etc. For example, a common practice
 # is to place the project's main package in a "cmd" subdirectory.
 ifneq "" "$(wildcard cmd/$(PROJECT))"
-# If a directory named PROJECT is found in the "cmd" subdirectory, use it as
-# the main package.
-GOCMD ?= $(IMPORT)/cmd/$(PROJECT)
+  # If a directory named PROJECT is found in the "cmd" subdirectory, use it as
+  # the main package.
+  GOCMD ?= $(IMPORT)/cmd/$(PROJECT)
 else
-GOCMD ?= # Otherwise, if GOCMD left undefined, use IMPORT.
+  GOCMD ?= # Otherwise, if GOCMD left undefined, use IMPORT.
 endif
 
 # Command executable (e.g., targets "build", "run")
@@ -100,7 +101,7 @@ platforms :=                                           \
 
 # Verify a valid build target was provided.
 ifeq "" "$(strip $(filter $(platforms),$(PLATFORM)))"
-$(error unsupported PLATFORM "$(PLATFORM)" (see: "make help"))
+  $(error unsupported PLATFORM "$(PLATFORM)" (see: "make help"))
 endif
 
 # Parse arch (386, amd64, ...) and OS (linux, darwin, ...) from platform.
@@ -116,36 +117,38 @@ zipext := .zip
 # Invoke system commands using their full executable path to override any shell
 # functions or aliases (which might conflict with the given flags or produce
 # unexpected output). If "type" fails, fallback on shell built-in "command".
-echo  := echo
-test  := test
-cd    := cd
-rm    := rm -rvf
-rmdir := rmdir
-cp    := cp -rv
-mkdir := mkdir -pv
-chmod := chmod -v
-tail  := tail
+env   := command env
+echo  := command echo
+test  := command test
+cd    := command cd
+rm    := command rm -rvf
+rmdir := command rmdir
+cp    := command cp -rv
+mkdir := command mkdir -pv
+chmod := command chmod -v
+tail  := command tail
 ls    := command ls
 grep  := command grep
 sed   := command sed
-tgz   := tar -czvf
-tbz   := tar -cjvf
-zip   := zip -vr
+tgz   := command tar -czvf
+tbz   := command tar -cjvf
+zip   := command zip -vr
 
 ifeq "$(os)" "windows"
-lds     := -Wl,--start-group
-lde     := -Wl,--end-group
-llvmopt := -DLLVM_ENABLE_THREADS=OFF -DLLVM_ENABLE_PIC=OFF
-cppflag := -DCINDEX_NO_EXPORTS
-ldflag  := -static -static-libgcc -static-libstdc++
-ldxflag := -lversion
-clang   := libclang
+  lds     := -Wl,--start-group
+  lde     := -Wl,--end-group
+  llvmopt := -DLLVM_ENABLE_THREADS=OFF -DLLVM_ENABLE_PIC=OFF
+  cppflag := -DCINDEX_NO_EXPORTS
+  ldflag  := -static -static-libgcc -static-libstdc++
+  ldxflag := -lversion
+  clang   := libclang
 else ifeq "$(os)" "darwin"
-clang   := clang
+  cgoflag := CGO_ENABLED=1
+  clang   := clang
 else
-lds     := -Wl,--start-group
-lde     := -Wl,--end-group
-clang   := clang
+  lds     := -Wl,--start-group
+  lde     := -Wl,--end-group
+  clang   := clang
 endif
 
 llvmsrc  := ../../llvm-project
@@ -179,19 +182,23 @@ cgoldflag  := $(ldflag) $(abspath $(llvmbin))/lib/lib$(clang).a                \
 	$(shell $(llvmbin)/bin/llvm-config --ldflags --libs --system-libs $(llvmcmp))\
 	-lstdc++ $(ldxflag)
 
-# Always call "go" with our Makefile-selected platform, which effectively
-# provides support for cross-compilation.
-go :=                                                                          \
-	CGO_CPPFLAGS="$(cgocppflag)"                                                 \
-	CGO_CXXFLAGS="$(cgocxxflag)"                                                 \
-	CGO_LDFLAGS="$(cgoldflag)"                                                   \
-	GOOS="$(os)" GOARCH="$(arch)" command go
-
 # Export variables as strings to the selected package, and, if a debugger was
 # selected, disable most Go compiler optimizations.
 goflags ?= -v -tags=byollvm                                                    \
-	-ldflags='-w -s $(foreach %,$(EXPORTS),-X "$(EXPORTPATH).$(%)=$($(%))")'     \
+	-ldflags='$(if $(strip $(DEBUG)),,-w -s)                                     \
+	  $(foreach %,$(EXPORTS),-X "$(EXPORTPATH).$(%)=$($(%))")'                   \
 	$(and $(strip $(DEBUG)),-gcflags=all="-N -l")
+
+goenv :=                                                                       \
+	CGO_CPPFLAGS="$(cgocppflag)"                                                 \
+	CGO_CXXFLAGS="$(cgocxxflag)"                                                 \
+	CGO_LDFLAGS="$(cgoldflag)"                                                   \
+	GOOS="$(os)" GOARCH="$(arch)"                                                \
+	$(cgoflag)
+
+# Always call "go" with our relevant clang/cgo flags as well as our Makefile-
+# defined target platform, which enables cross-compilation support.
+go := $(goenv) command go
 
 # Output paths derived from current configuration:
 srcdir := $(or $(GOCMD),$(IMPORT))
@@ -201,9 +208,6 @@ outdir := $(BINPATH)/$(PLATFORM)
 outexe := $(outdir)/$(PROJECT)$(binext)
 pkgver := $(PKGPATH)/$(VERSION)
 triple := $(PROJECT)-$(VERSION)-$(PLATFORM)
-
-# Targets for directories to clean when all of their content is removed.
-mclean := $(addprefix clean-,$(BINPATH) $(PKGPATH))
 
 # Since it isn't possible to pass arguments from "make" to the target executable
 # (without, e.g., inline variable definitions), we simply use a separate shell
@@ -242,7 +246,7 @@ flush:
 	$(rm) "$(outdir)" "$(pkgver)"
 
 .PHONY: clean
-clean: tidy flush $(mclean)
+clean: tidy flush $(addprefix clean-,$(BINPATH) $(PKGPATH))
 
 .PHONY: tidy
 ifneq "" "$(strip $(filter %go.mod,$(METASOURCES)))"
@@ -270,6 +274,15 @@ vet: tidy $(SOURCES) $(METASOURCES)
 .PHONY: run
 run: $(runsh)
 
+.PHONY: goenv
+goenv:
+	@# Print each environment variable, one per line
+	@$(env) -i $(goenv) env
+
+.PHONY: goflags
+goflags:
+	@$(echo) $(goflags)
+
 go.mod:
 	@$(go) mod init "$(IMPORT)"
 
@@ -281,12 +294,12 @@ $(outexe): $(SOURCES) $(METASOURCES) $(outdir)
 	@$(echo) " -- success: $(@)"
 
 $(runsh):
-	@$(echo) "$$RUNSH" > "$(@)"
+	@$(echo) "$$__RUNSH__" > "$(@)"
 	@$(chmod) +x "$(@)"
 	@$(echo) " -- success: $(@)"
 	@$(echo)
-	@# print the comment block at top of shell script for usage details
-	@$(sed) -nE '/^#!/,/^\s*[^#]/{ /^\s*#([^!]|$)/{ s/^(\s*)#/  |\1/;p } }' "$(@)"
+	@# Print the comment block at top of shell script for usage details
+	@$(sed) -nE '/^#!/,/^\s*[^#]/{/^\s*#([^!]|$$)/{s/^(\s*)#/  |\1/;p;};}' "$(@)"
 
 .PHONY: debug
 debug:
