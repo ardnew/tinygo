@@ -132,14 +132,65 @@ tgz   := tar -czvf
 tbz   := tar -cjvf
 zip   := zip -vr
 
+ifeq "$(os)" "windows"
+lds     := -Wl,--start-group
+lde     := -Wl,--end-group
+llvmopt := -DLLVM_ENABLE_THREADS=OFF -DLLVM_ENABLE_PIC=OFF
+cppflag := -DCINDEX_NO_EXPORTS
+ldflag  := -static -static-libgcc -static-libstdc++
+ldxflag := -lversion
+clang   := libclang
+else ifeq "$(os)" "darwin"
+clang   := clang
+else
+lds     := -Wl,--start-group
+lde     := -Wl,--end-group
+clang   := clang
+endif
+
+llvmsrc  := ../../llvm-project
+llvmbin  := ../../llvm-build
+llvmcmp  := all-targets analysis asmparser asmprinter bitreader bitwriter      \
+	codegen core coroutines coverage debuginfodwarf executionengine              \
+	frontendopenmp instrumentation interpreter ipo irreader linker lto mc mcjit  \
+	objcarcopts option profiledata scalaropts support target
+
+clangsrc     := $(llvmsrc)/clang
+clanglibname := clangAnalysis clangAST clangASTMatchers clangBasic             \
+	clangCodeGen clangCrossTU clangDriver clangDynamicASTMatchers clangEdit      \
+	clangFormat clangFrontend clangFrontendTool clangHandleCXX clangHandleLLVM   \
+	clangIndex clangLex clangParse clangRewrite clangRewriteFrontend clangSema   \
+	clangSerialization clangTooling clangToolingASTDiff clangToolingCore         \
+	clangToolingInclusions
+clanglibflag := $(lds) $(addprefix -l,$(clanglibname)) $(lde) -lstdc++
+
+lldsrc     := $(llvmsrc)/lld
+lldlibname := lldCOFF lldCommon lldCore lldDriver lldELF lldMachO lldMinGW     \
+	lldReaderWriter lldWasm lldYAML
+lldlibflag := $(lds) $(addprefix -l,$(lldlibname)) $(lde)
+
+cgocppflag := $(cppflag) $(shell $(llvmbin)/bin/llvm-config --cppflags)        \
+	-I$(abspath $(llvmbin))/tools/clang/include                                  \
+	-I$(abspath $(clangsrc))/include                                             \
+	-I$(abspath $(lldsrc))/include
+cgocxxflag := -std=c++14
+cgoldflag  := $(ldflag) $(abspath $(llvmbin))/lib/lib$(clang).a                \
+	-L$(abspath $(llvmbin)/lib) $(clanglibflag) $(lldlibflag)                    \
+	$(shell $(llvmbin)/bin/llvm-config --ldflags --libs --system-libs $(llvmcmp))\
+	-lstdc++ $(ldxflag)
+
 # Always call "go" with our Makefile-selected platform, which effectively
 # provides support for cross-compilation.
-go := GOOS="$(os)" GOARCH="$(arch)" command go
+go :=                                                                          \
+	CGO_CPPFLAGS="$(cgocppflag)"                                                 \
+	CGO_CXXFLAGS="$(cgocxxflag)"                                                 \
+	CGO_LDFLAGS="$(cgoldflag)"                                                   \
+	GOOS="$(os)" GOARCH="$(arch)" command go
 
 # Export variables as strings to the selected package, and, if a debugger was
 # selected, disable most Go compiler optimizations.
-goflags ?= -v \
-	-ldflags='-w -s $(foreach %,$(EXPORTS),-X "$(EXPORTPATH).$(%)=$($(%))")' \
+goflags ?= -v -tags=byollvm                                                    \
+	-ldflags='-w -s $(foreach %,$(EXPORTS),-X "$(EXPORTPATH).$(%)=$($(%))")'     \
 	$(and $(strip $(DEBUG)),-gcflags=all="-N -l")
 
 # Output paths derived from current configuration:
