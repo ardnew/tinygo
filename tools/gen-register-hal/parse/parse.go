@@ -1,20 +1,19 @@
 package parse
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
-	"fmt"
-	"go/types"
-	"io/ioutil"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io"
 	"os"
 	"path/filepath"
 
 	"github.com/tinygo-org/tinygo/builder"
 	"github.com/tinygo-org/tinygo/compileopts"
-	"github.com/tinygo-org/tinygo/compiler"
-	"github.com/tinygo-org/tinygo/goenv"
 	"github.com/tinygo-org/tinygo/loader"
-
-	"github.com/tinygo-org/tinygo/tools/gen-register-hal/util"
 )
 
 var (
@@ -24,9 +23,23 @@ var (
 )
 
 type Parser struct {
-	Program *loader.Program
-	Package map[string]*loader.Package
-	mainPkg string
+	Config  Config
+	Package map[string]*Package
+
+	opts *compileopts.Config
+	fset *token.FileSet
+}
+
+type Package struct {
+	Json struct {
+		Dir        string
+		Name       string
+		ImportPath string
+		GoFiles    []string
+		//CgoFiles []string
+		//CFiles   []string
+	}
+	File []*ast.File
 }
 
 type Config struct {
@@ -46,81 +59,76 @@ func New(c Config) (*Parser, error) {
 	}
 
 	var parser = Parser{
-		Package: map[string]*loader.Package{},
+		Config:  c,
+		Package: map[string]*Package{},
+		fset:    token.NewFileSet(),
 	}
+	var err error
 
-	conf, err := builder.NewConfig(&compileopts.Options{Target: c.Target})
+	parser.opts, err = builder.NewConfig(&compileopts.Options{Target: c.Target})
 	if err != nil {
 		return nil, err
 	}
 
-	mainDir := goenv.Get("TINYGOROOT")
-	dir, err := ioutil.TempDir(mainDir, filepath.Base(os.Args[0])+"-*")
+	return &parser, nil
+}
+
+func (p *Parser) Parse() error {
+
+	var list = &bytes.Buffer{}
+
+	cmd, err := loader.List(p.opts, []string{"-json"}, p.Config.Import)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	defer os.RemoveAll(dir)
-
-	parser.mainPkg = filepath.Join(dir, "main.go")
-	if err := ioutil.WriteFile(parser.mainPkg, gomain(), 0644); err != nil {
-		return nil, err
-	}
-
-	mach, err := compiler.NewTargetMachine(
-		&compiler.Config{
-			Triple:          conf.Triple(),
-			CPU:             conf.CPU(),
-			Features:        conf.Features(),
-			GOOS:            conf.GOOS(),
-			GOARCH:          conf.GOARCH(),
-			CodeModel:       conf.CodeModel(),
-			RelocationModel: conf.RelocationModel(),
-
-			Scheduler:          conf.Scheduler(),
-			FuncImplementation: conf.FuncImplementation(),
-			AutomaticStackSize: conf.AutomaticStackSize(),
-			DefaultStackSize:   conf.Target.DefaultStackSize,
-			NeedsStackObjects:  conf.NeedsStackObjects(),
-			Debug:              true,
-			LLVMFeatures:       conf.LLVMFeatures(),
-		})
-	if err != nil {
-		return nil, err
+	cmd.Stdout = list
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return err
 	}
 
-	parser.Program, err = loader.Load(conf,
-		append([]string{filepath.Dir(parser.mainPkg)}, c.Import...),
-		conf.ClangHeaders, types.Config{Sizes: compiler.Sizes(mach)})
-	if err != nil {
-		return nil, err
-	}
-
-	for path, pkg := range parser.Program.Packages {
-		if util.IsInSlice(c.Import, path) {
-			parser.Package[path] = pkg
-		}
-	}
-
-	var missing string
-	for _, path := range c.Import {
-		if _, ok := parser.Package[path]; !ok {
-			if len(missing) > 0 {
-				missing += ", "
+	dec := json.NewDecoder(list)
+	for {
+		var k Package
+		if err := dec.Decode(&k.Json); err != nil {
+			if err == io.EOF {
+				break
 			}
-			missing += util.Qc(path, '"')
+			return err
+		}
+		p.Package[k.Json.ImportPath] = &k
+	}
+
+	for _, pkg := range p.Package {
+		pkg.File = []*ast.File{}
+		for _, name := range pkg.Json.GoFiles {
+			file, err := parser.ParseFile(p.fset, filepath.Join(pkg.Json.Dir, name),
+				nil, parser.ParseComments)
+			if err != nil {
+				return err
+			}
+			pkg.File = append(pkg.File, file)
 		}
 	}
-	if len(missing) > 0 {
-		return nil, fmt.Errorf("%w: %q", ErrPackageNotFound, missing)
-	}
 
-	return &parser, parser.Program.Parse()
+	return nil
 }
 
-func gomain() []byte {
-	return []byte(`
-package main
-
-func main() {}
-	`)
-}
+// func mainPkg() (path string, err error) {
+// 	// Create a temporary directory in TINYGOROOT whose name is the same as our
+// 	// currently running executable (with a random suffix created by TempDir).
+// 	// For example:
+// 	//   /path/to/TINYGOROOT/gen-register-hal-843454839
+// 	path, err = ioutil.TempDir(goenv.Get("TINYGOROOT"),
+// 		filepath.Base(os.Args[0])+"-*")
+// 	if err != nil {
+// 		return "", err
+// 	}
+// 	// Write a minimal main package to appease the parser.
+// 	err = ioutil.WriteFile(filepath.Join(path, "main.go"),
+// 		[]byte(`package main;func main(){}`), 0644)
+// 	if err != nil {
+// 		return "", err
+// 	}
+// 	return
+// }

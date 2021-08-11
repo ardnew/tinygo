@@ -28,16 +28,19 @@ func main() {
 	if Flags.Version() {
 		fmt.Println(Version())
 	} else {
-		config := parse.Config{
+		c := parse.Config{
 			Target: Flags.Target(),
 			Import: Flags.Imports(),
 			Types:  typ,
 		}
-		par, err := parse.New(config)
+		p, err := parse.New(c)
 		if err != nil {
 			halt(err)
 		}
-		util.Dump(par.Package)
+		if err = p.Parse(); err != nil {
+			halt(err)
+		}
+		util.Dump(p.Package)
 	}
 }
 
