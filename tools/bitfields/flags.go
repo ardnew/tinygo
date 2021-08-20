@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/tinygo-org/tinygo/tools/gen-register-hal/util"
+	"github.com/tinygo-org/tinygo/tools/bitfields/util"
 )
 
 var Flags = flags{FlagSet: flag.CommandLine}

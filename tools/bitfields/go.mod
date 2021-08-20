@@ -1,4 +1,4 @@
-module github.com/tinygo-org/tinygo/tools/gen-register-hal
+module github.com/tinygo-org/tinygo/tools/bitfields
 
 go 1.16
 

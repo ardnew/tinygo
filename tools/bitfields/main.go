@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/tinygo-org/tinygo/tools/gen-register-hal/parse"
-	"github.com/tinygo-org/tinygo/tools/gen-register-hal/util"
+	"github.com/tinygo-org/tinygo/tools/bitfields/parse"
+	"github.com/tinygo-org/tinygo/tools/bitfields/util"
 )
 
 var (

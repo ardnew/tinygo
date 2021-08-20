@@ -32,7 +32,7 @@ endif
 # | project symbols exported verbatim via go linker                            |
 # +----------------------------------------------------------------------------+
 
-PROJECT   ?= gen-register-hal
+PROJECT   ?= bitfields
 IMPORT    ?= github.com/tinygo-org/tinygo/tools/$(PROJECT)
 VERSION   ?= 0.1.0
 BUILDTIME ?= $(shell date -u '+%FT%TZ')
