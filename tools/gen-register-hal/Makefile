@@ -5,9 +5,14 @@
 # Call to return the first non-empty value from "go env" or a default value.
 getgoenv = $(firstword $(foreach e,$(1),$(shell go env $(e))) $(2))
 
-# Verify we have a valid GOPATH that physically exists.
+GOPATH ?= $(call getgoenv,GOPATH)
+GOROOT ?= $(call getgoenv,GOROOT)
+
+# Verify we have a valid GOPATH, GOROOT that physically exist.
 ifeq "" "$(strip $(wildcard $(GOPATH)))"
   $(error invalid GOPATH="$(GOPATH)")
+else ifeq "" "$(strip $(wildcard $(GOROOT)))"
+  $(error invalid GOROOT="$(GOROOT)")
 endif
 
 # Define which debugger to use (optional; disables optimizations).
@@ -20,9 +25,6 @@ ifeq "gdb" "$(DEBUG)"
   # Go source code ships with a GDB Python extension that enables:
   #   -- Inspection of runtime internals (e.g., goroutines)
   #   -- Pretty-printing built-in types (e.g., map, slice, and channel)
-  ifeq "" "$(GOROOT)"
-    $(error invalid GOROOT="$(GOROOT)")
-  endif
   GDBRTL ?= "$(wildcard $(GOROOT)/src/runtime/runtime-gdb.py)"
 endif
 
@@ -97,14 +99,14 @@ GOTAGS ?= byollvm
 
 # Export variables as strings to the selected package, and, if a debugger was
 # NOT selected, strip symbol table and omit DWARF debug segments.
-GOLDFLAGS ?= -ldflags='$(if $(strip $(DEBUG)),,-w -s)                          \
-  $(foreach %,$(EXPORTS),-X "$(EXPORTPATH).$(%)=$($(%))")'
+GOLDFLAGS ?= -ldflags='$(if $(strip $(DEBUG)),,-w -s)$(foreach                 \
+  %,$(EXPORTS),-X "$(EXPORTPATH).$(%)=$($(%))")'
 
 # If a debugger was selected, disable most compiler optimizations.
-GOGCFLAGS ?= $(and $(strip $(DEBUG)),-gcflags=all="-N -l")
+GOGCFLAGS ?= $(and $(strip $(DEBUG)),-gcflags=all='-N -l')
 
 # This is also a good place to add any global build flags you need.
-GOFLAGS ?= -v -tags="$(GOTAGS)" $(GOLDFLAGS) $(GOGCFLAGS)
+GOFLAGS ?= -v -tags='$(GOTAGS)' $(GOLDFLAGS) $(GOGCFLAGS)
 
 #        +==========================================================+
 #   --=<])  YOU SHOULD NOT NEED TO MODIFY ANYTHING BELOW THIS LINE  ([>=--
@@ -148,6 +150,7 @@ tail  := \tail
 ls    := \ls
 grep  := \grep
 sed   := \sed
+jq    := \jq
 tgz   := \tar -czvf
 tbz   := \tar -cjvf
 zip   := \zip -vr
@@ -212,6 +215,7 @@ goenv :=                                                                       \
 # Always call "go" with our relevant clang/cgo flags as well as our Makefile-
 # defined target platform, which enables cross-compilation support.
 go := $(goenv) command go
+gofmt := \gofmt
 
 # Output paths derived from current configuration:
 srcdir := $(or $(GOCMD),$(IMPORT))
@@ -242,6 +246,29 @@ fi
 endef
 export __RUNSH__
 
+# The following script is a `jq` filter that will translate sh-style environment
+# variable definitions into JSON syntax: 'KEY=VALUE' -> '{"KEY": "VALUE"}'
+define __JQFILTER__
+  def parse: capture("(?<ident>[^=]*)=(?<value>.*)");
+  reduce inputs as $$line ({};
+    ($$line | parse) as $$p
+    | .[$$p.ident] = ($$p.value) )
+
+endef
+export __JQFILTER__
+
+define __JQSETTINGS__
+{
+  "go.goroot": "$(GOROOT)",
+  "go.gopath": "$(GOPATH)",
+  "go.toolsGopath": "$(GOPATH)",
+  "go.buildFlags": [],
+  "go.buildTags": "",
+  "go.toolsEnvVars": {}
+}
+endef
+export __JQSETTINGS__
+
 # +----------------------------------------------------------------------------+
 # | make targets                                                               |
 # +----------------------------------------------------------------------------+
@@ -263,11 +290,15 @@ clean: tidy flush $(addprefix clean-,$(BINPATH) $(PKGPATH))
 
 .PHONY: tidy
 ifneq "" "$(strip $(filter %go.mod,$(METASOURCES)))"
-tidy: $(and "$(strip $(filter %go.mod,$(METASOURCES)))",mod)
+tidy: $(and "$(strip $(filter %go.mod,$(METASOURCES)))",mod) fmt
 	@$(go) mod tidy
 else
-tidy:
+tidy: fmt
 endif
+
+.PHONY: fmt
+fmt: $(SOURCES) $(METASOURCES)
+	@$(gofmt) -e -l -s -w .
 
 .PHONY: mod
 mod: go.mod
@@ -289,13 +320,16 @@ run: $(runsh)
 
 .PHONY: goenv
 goenv:
-	@# Print each environment variable in "sh" declaration format (KEY=VAL).
-	@# TODO: Print environment in JSON format (for .vscode settings).
-	@$(env) -i $(goenv) env
+	@$(env) -i $(goenv) env # | $(jq) -nR "$$__JQFILTER__"
 
 .PHONY: goflags
 goflags:
-	@$(echo) $(GOFLAGS)
+	@$(echo) "$(GOFLAGS)"
+
+.PHONY: vscode-settings
+vscode-settings: goflags
+	@$(echo) "$$__JQSETTINGS__"
+	@$(env) -i $(goenv) env | $(jq) -nMR "$$__JQFILTER__"
 
 go.mod:
 	@$(go) mod init "$(IMPORT)"
@@ -349,4 +383,3 @@ tbz: $(EXTRAFILES) $(pkgver)/$(triple)$(tbzext)
 $(pkgver)/%$(tbzext): $(outexe) $(pkgver)/%
 	$(cp) "$(<)" $(EXTRAFILES) "$(@D)/$(*)"
 	@$(cd) "$(@D)" && $(tbz) "$(*)$(tbzext)" "$(*)"
-

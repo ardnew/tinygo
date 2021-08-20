@@ -29,6 +29,7 @@ func (i *importsFlag) Set(path string) error {
 	if i.path == nil {
 		i.path = []string{}
 	}
+	strings.Split(m ":" )
 	for _, s := range i.path {
 		if s == path {
 			return nil // path already exists, just ignore this duplicate silently
@@ -45,7 +46,7 @@ func (f *flags) Imports() []string { return f.imports.path }
 func (f *flags) parse(args []string) []string {
 	f.BoolVar(&f.version, "version", false, "Print version and quit")
 	f.StringVar(&f.target, "t", "", "Generate register descriptors for `TARGET`")
-	f.Var(&f.imports, "p", "Use registers in each package `IMPORT`")
+	f.Var(&f.imports, "p", "Consider types and consts in each package `IMPORT`")
 	f.Usage = f.usage
 	f.Parse(args)
 	// Remaining arguments, if any, are all peripheral type identifiers.
@@ -54,19 +55,20 @@ func (f *flags) parse(args []string) []string {
 
 func (f *flags) usage() {
 
-	errf(Version())
-	errf("")
-	errf("Generate TinyGo source code that adds memory-mapped register bitfield")
-	errf("manipulation methods to the given peripheral(s) and target device.")
-	errf("")
-	errf("Methods are generated for all types found if no peripherals are specified.")
-	errf("")
-	errf("Peripherals are located in the import path(s) specified with flag -p, which")
-	errf("may be given multiple times.")
-	errf("")
+	errf(Version() + `
+
+Generate TinyGo source code containing types and methods for interacting with
+individual bit fields within memory-mapped registers of integrated peripherals.
+
+Source code is generated for all peripherals discovered if none are specified;
+this is also true for registers and/or bit fields.
+
+Peripherals, registers, and bit fields are located in packages at import path(s)
+specified with flag -p (use flag -p multiple times to search multiple packages).
+`)
 
 	errf("Usage:")
-	errf(indent(PROJECT), "[flags]", "[peripheral-type ...]")
+	errf(indent(PROJECT), "[flags]", "[peripheral[:[register]:[bitfield,...]] ...]")
 	errf("")
 
 	errf("Flags:")

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"go/ast"
 	"go/parser"
 	"go/token"
 	"io"
@@ -22,30 +21,58 @@ var (
 	ErrPackageNotFound   = errors.New("package not found")
 )
 
+// Parser is the primary runtime control structure that stores all of the
+// requested peripherals and bitfields for each named package import path.
 type Parser struct {
 	Config  Config
 	Package map[string]*Package
-
-	opts *compileopts.Config
-	fset *token.FileSet
+	opts    *compileopts.Config
 }
 
-type Package struct {
-	Json struct {
-		Dir        string
-		Name       string
-		ImportPath string
-		GoFiles    []string
-		//CgoFiles []string
-		//CFiles   []string
-	}
-	File []*ast.File
-}
-
+// Config contains the user configuration options derived via command-line flags
+// and/or process environment. Config fields are , and they
+// select the peripheral types to include in the generated register interfaces.
 type Config struct {
+
+	// Target is used to select the appropriate TinyGo build tags for resolving Go
+	// source files at a given import path. Target should be the full name of the
+	// TinyGo target board (not a specific microcontroller or family), the same as
+	// those used in the `tinygo -target` command-line flag.
 	Target string
+
+	// Import defines the Go package import paths to the target's SVD-generated
+	// device interface descriptors, typically located in a "device" subdirectory
+	// for the target's family of microcontrollers. For example:
+	//  "device/sam", "device/stm32", "device/avr", or even "device/arm"
+	//
+	// These are relative paths using the same rules as standard Go's import path
+	// resolution, but based on the selected target's TINYGOROOT.
+	//
+	// Note these should not be actual filesystem paths — except by coincidence —
+	// and their paths should never end with a regular file name (with .go or any
+	// other filename extension).
+	//
+	// It is not necessary for the resolved files at a given import path be among
+	// the SVD-generated TinyGo source files. As long as the peripheral types,
+	// bitmask constants, and so on..., all follow the same naming conventions and
+	// file structure, then the AST should be handled appropriately. This tool
+	// was, nonetheless, designed based on the output of TinyGo's gen-device-svd.
+	// So... Your Mileage May Vary.
 	Import []string
-	Types  []string
+
+	// Types defines the package-local type identifiers for those peripherals
+	// whose memory-mapped registers shall have methods generated to manipulate
+	// their individual bitfields.
+	//
+	// For example, if Target is "teensy40", Import contains "device/nxp", and we
+	// want to generate interfaces for the UART peripheral ("LPUART_Type"), then
+	// types should contain that peripheral type identifier alone. It should NOT
+	// contain a package qualification, or an instance of that type:
+	//   "LPUART_Type"       // ok
+	//   "nxp.LPUART_Type"   // bad: includes package-qualifier
+	//   "LPUART0"           // bad: is an instance of type LPUART_Type
+	//   "nxp.LPUART0"       // bad: package-qualified instance (come on now...)
+	Types []string
 }
 
 func New(c Config) (*Parser, error) {
@@ -58,77 +85,61 @@ func New(c Config) (*Parser, error) {
 		return nil, ErrNoImportPath
 	}
 
-	var parser = Parser{
+	var p = Parser{
 		Config:  c,
 		Package: map[string]*Package{},
-		fset:    token.NewFileSet(),
 	}
 	var err error
 
-	parser.opts, err = builder.NewConfig(&compileopts.Options{Target: c.Target})
+	p.opts, err = builder.NewConfig(&compileopts.Options{Target: c.Target})
 	if err != nil {
 		return nil, err
 	}
 
-	return &parser, nil
+	return &p, nil
 }
 
 func (p *Parser) Parse() error {
 
-	var list = &bytes.Buffer{}
+	var b = &bytes.Buffer{}
 
-	cmd, err := loader.List(p.opts, []string{"-json"}, p.Config.Import)
+	c, err := loader.List(p.opts, []string{"-json"}, p.Config.Import)
 	if err != nil {
 		return err
 	}
-	cmd.Stdout = list
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	c.Stdout = b
+	c.Stderr = os.Stderr
+	if err := c.Run(); err != nil {
 		return err
 	}
 
-	dec := json.NewDecoder(list)
+	d := json.NewDecoder(b)
 	for {
 		var k Package
-		if err := dec.Decode(&k.Json); err != nil {
+		if err := d.Decode(&k.Json); err != nil {
 			if err == io.EOF {
 				break
 			}
 			return err
 		}
+		k.Periph = map[string]*Periph{}
+		for _, typ := range p.Config.Types {
+			k.Periph[periphIdent(typ)] = &Periph{}
+		}
 		p.Package[k.Json.ImportPath] = &k
 	}
 
-	for _, pkg := range p.Package {
-		pkg.File = []*ast.File{}
-		for _, name := range pkg.Json.GoFiles {
-			file, err := parser.ParseFile(p.fset, filepath.Join(pkg.Json.Dir, name),
+	for _, k := range p.Package {
+		fset := token.NewFileSet()
+		for _, name := range k.Json.GoFiles {
+			file, err := parser.ParseFile(fset, filepath.Join(k.Json.Dir, name),
 				nil, parser.ParseComments)
 			if err != nil {
 				return err
 			}
-			pkg.File = append(pkg.File, file)
+			k.scan(file)
 		}
 	}
 
 	return nil
 }
-
-// func mainPkg() (path string, err error) {
-// 	// Create a temporary directory in TINYGOROOT whose name is the same as our
-// 	// currently running executable (with a random suffix created by TempDir).
-// 	// For example:
-// 	//   /path/to/TINYGOROOT/gen-register-hal-843454839
-// 	path, err = ioutil.TempDir(goenv.Get("TINYGOROOT"),
-// 		filepath.Base(os.Args[0])+"-*")
-// 	if err != nil {
-// 		return "", err
-// 	}
-// 	// Write a minimal main package to appease the parser.
-// 	err = ioutil.WriteFile(filepath.Join(path, "main.go"),
-// 		[]byte(`package main;func main(){}`), 0644)
-// 	if err != nil {
-// 		return "", err
-// 	}
-// 	return
-// }
