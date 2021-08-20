@@ -35,6 +35,6 @@ func Qs(s, q string) string {
 func Dump(a ...interface{}) {
 	c := spew.NewDefaultConfig()
 	c.Indent = "    "
-	c.MaxDepth = 3
+	c.MaxDepth = 0
 	c.Fdump(os.Stderr, a...)
 }

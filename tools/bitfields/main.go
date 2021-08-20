@@ -23,7 +23,7 @@ func Version() string {
 
 func main() {
 
-	typ := Flags.parse(os.Args[1:])
+	arg := Flags.parse(os.Args[1:])
 
 	if Flags.Version() {
 		fmt.Println(Version())
@@ -31,9 +31,8 @@ func main() {
 		c := parse.Config{
 			Target: Flags.Target(),
 			Import: Flags.Imports(),
-			Types:  typ,
 		}
-		p, err := parse.New(c)
+		p, err := parse.New(c, arg...)
 		if err != nil {
 			halt(err)
 		}
@@ -50,6 +49,8 @@ func halt(err error) {
 
 	code := 127
 	switch {
+	case errors.Is(err, ErrArgument):
+		code = 1
 	case errors.Is(err, parse.ErrUnspecifiedTarget):
 		code = 2
 	case errors.Is(err, parse.ErrNoImportPath):

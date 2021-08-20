@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/tinygo-org/tinygo/builder"
 	"github.com/tinygo-org/tinygo/compileopts"
@@ -60,22 +61,13 @@ type Config struct {
 	// So... Your Mileage May Vary.
 	Import []string
 
-	// Types defines the package-local type identifiers for those peripherals
-	// whose memory-mapped registers shall have methods generated to manipulate
-	// their individual bitfields.
-	//
-	// For example, if Target is "teensy40", Import contains "device/nxp", and we
-	// want to generate interfaces for the UART peripheral ("LPUART_Type"), then
-	// types should contain that peripheral type identifier alone. It should NOT
-	// contain a package qualification, or an instance of that type:
-	//   "LPUART_Type"       // ok
-	//   "nxp.LPUART_Type"   // bad: includes package-qualifier
-	//   "LPUART0"           // bad: is an instance of type LPUART_Type
-	//   "nxp.LPUART0"       // bad: package-qualified instance (come on now...)
-	Types []string
+	// TODO: godoc
+	Types typeSpec
 }
 
-func New(c Config) (*Parser, error) {
+type typeSpec map[string]map[string][]string
+
+func New(c Config, arg ...string) (*Parser, error) {
 
 	if c.Target == "" {
 		return nil, ErrUnspecifiedTarget
@@ -83,6 +75,11 @@ func New(c Config) (*Parser, error) {
 
 	if len(c.Import) == 0 {
 		return nil, ErrNoImportPath
+	}
+
+	// Parse the remaining command-line arguments to populate our Config.
+	if err := c.parse(arg...); err != nil {
+		return nil, err
 	}
 
 	var p = Parser{
@@ -123,7 +120,7 @@ func (p *Parser) Parse() error {
 			return err
 		}
 		k.Periph = map[string]*Periph{}
-		for _, typ := range p.Config.Types {
+		for typ := range p.Config.Types {
 			k.Periph[periphIdent(typ)] = &Periph{}
 		}
 		p.Package[k.Json.ImportPath] = &k
@@ -138,6 +135,59 @@ func (p *Parser) Parse() error {
 				return err
 			}
 			k.scan(file)
+		}
+	}
+
+	return nil
+}
+
+func (c *Config) parse(arg ...string) error {
+
+	// TODO: replace manual string parsing with following regular expression:
+	//   (?P<peripheral>[^\s:]+)(?::(?P<register>[^\s:]*)(?::(?P<bitfields>[^\s:]*))?)?
+	c.Types = typeSpec{}
+	for _, s := range arg {
+		es := strings.Split(s, ":")
+		bs := []string{}
+		if len(es) > 2 {
+			for _, b := range es[2:] {
+				bs = append(bs, strings.Split(b, ",")...)
+			}
+		}
+		rs := ""
+		if len(es) > 1 {
+			rs = es[1]
+		}
+		// Split will always return at least 1 element if sep is not empty.
+		if cr, ok := c.Types[es[0]]; ok {
+			// We already have this peripheral in the spec.
+			// Check if we have this register included with that peripheral.
+			if cb, ok := cr[rs]; ok {
+				// We already have this peripheral register in the spec.
+				// Append all bit fields that are not already included in the register.
+				for _, b := range bs {
+					exists := false
+					for _, c := range cb {
+						if exists = b == c; exists {
+							break
+						}
+					}
+					// Silently ignore any duplicate bit fields.
+					if !exists {
+						cb = append(cb, b)
+					}
+				}
+				// Make sure the register has the updated bit field slice.
+				cr[rs] = cb
+			} else {
+				// This is a new register added to the peripheral.
+				cr[rs] = bs
+			}
+			// Make sure the spec has the updated register.
+			c.Types[es[0]] = cr
+		} else {
+			// This is a new peripheral added to the spec.
+			c.Types[es[0]] = map[string][]string{rs: bs}
 		}
 	}
 

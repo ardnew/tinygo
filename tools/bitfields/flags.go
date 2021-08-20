@@ -1,12 +1,20 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"regexp"
 	"strings"
 
 	"github.com/tinygo-org/tinygo/tools/bitfields/util"
+)
+
+var (
+	ErrArgument     = errors.New("invalid argument")
+	ErrBitFieldSpec = fmt.Errorf("%w: bit field specification", ErrArgument)
+	ErrRegisterSpec = fmt.Errorf("%w: register specification", ErrArgument)
+	ErrPeriphSpec   = fmt.Errorf("%w: peripheral specification", ErrArgument)
 )
 
 var Flags = flags{FlagSet: flag.CommandLine}
@@ -29,7 +37,6 @@ func (i *importsFlag) Set(path string) error {
 	if i.path == nil {
 		i.path = []string{}
 	}
-	strings.Split(m ":" )
 	for _, s := range i.path {
 		if s == path {
 			return nil // path already exists, just ignore this duplicate silently
@@ -49,7 +56,7 @@ func (f *flags) parse(args []string) []string {
 	f.Var(&f.imports, "p", "Consider types and consts in each package `IMPORT`")
 	f.Usage = f.usage
 	f.Parse(args)
-	// Remaining arguments, if any, are all peripheral type identifiers.
+	// Remaining arguments, if any, are all peripheral/register/bit field specs.
 	return f.Args()
 }
 
