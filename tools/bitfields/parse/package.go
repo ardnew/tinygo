@@ -5,8 +5,6 @@ import (
 	"go/token"
 	"strconv"
 	"strings"
-
-	"github.com/davecgh/go-spew/spew"
 )
 
 type Package struct {
@@ -54,7 +52,6 @@ func (p *Package) scan(f *ast.File) {
 								Registers: []Register{},
 							}
 							ast.Walk(per.typeVisitor(), per.spec)
-							// spew.Dump(periph.Registers)
 						}
 					}
 				}
@@ -83,6 +80,7 @@ func (p *Package) scan(f *ast.File) {
 								continue
 							}
 							bf := reg.Field[bn]
+							bf.reg = reg
 
 							switch v := t.Values[i].(type) {
 							case *ast.BasicLit:
@@ -105,7 +103,6 @@ func (p *Package) scan(f *ast.File) {
 								}
 							}
 							reg.Field[bn] = bf
-							// spew.Dump(reg.Field)
 						}
 
 					}
@@ -115,8 +112,6 @@ func (p *Package) scan(f *ast.File) {
 			}
 		}
 	}
-
-	spew.Dump(p)
 }
 
 // bitFieldRegister returns the receiver Package's Periph and its Register

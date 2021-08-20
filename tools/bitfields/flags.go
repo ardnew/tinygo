@@ -1,20 +1,12 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"regexp"
 	"strings"
 
 	"github.com/tinygo-org/tinygo/tools/bitfields/util"
-)
-
-var (
-	ErrArgument     = errors.New("invalid argument")
-	ErrBitFieldSpec = fmt.Errorf("%w: bit field specification", ErrArgument)
-	ErrRegisterSpec = fmt.Errorf("%w: register specification", ErrArgument)
-	ErrPeriphSpec   = fmt.Errorf("%w: peripheral specification", ErrArgument)
 )
 
 var Flags = flags{FlagSet: flag.CommandLine}

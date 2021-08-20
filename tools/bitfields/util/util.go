@@ -26,8 +26,9 @@ func IsInSlice(slice []string, s string) bool {
 
 func Qc(s string, q rune) string { return Qs(s, string(q)) }
 func Qs(s, q string) string {
+	s = strings.TrimSpace(s)
 	for len(s) >= 2*len(q) && strings.HasPrefix(s, q) && strings.HasSuffix(s, q) {
-		s = strings.TrimSuffix(strings.TrimPrefix(s, q), q)
+		s = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(s, q), q))
 	}
 	return q + s + q
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"go/parser"
 	"go/token"
 	"io"
@@ -17,6 +18,10 @@ import (
 )
 
 var (
+	ErrArgument          = errors.New("invalid argument")
+	ErrBitFieldSpec      = fmt.Errorf("%w: bit field specification", ErrArgument)
+	ErrRegisterSpec      = fmt.Errorf("%w: register specification", ErrArgument)
+	ErrPeriphSpec        = fmt.Errorf("%w: peripheral specification", ErrArgument)
 	ErrUnspecifiedTarget = errors.New("no TinyGo target (-t) specified")
 	ErrNoImportPath      = errors.New("no package import path (-p) specified")
 	ErrPackageNotFound   = errors.New("package not found")

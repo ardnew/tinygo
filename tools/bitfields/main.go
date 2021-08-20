@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/tinygo-org/tinygo/tools/bitfields/generate"
 	"github.com/tinygo-org/tinygo/tools/bitfields/parse"
-	"github.com/tinygo-org/tinygo/tools/bitfields/util"
 )
 
 var (
@@ -39,7 +39,8 @@ func main() {
 		if err = p.Parse(); err != nil {
 			halt(err)
 		}
-		util.Dump(p.Package)
+
+		generate.Generate()
 	}
 }
 
@@ -49,7 +50,7 @@ func halt(err error) {
 
 	code := 127
 	switch {
-	case errors.Is(err, ErrArgument):
+	case errors.Is(err, parse.ErrArgument):
 		code = 1
 	case errors.Is(err, parse.ErrUnspecifiedTarget):
 		code = 2

@@ -63,6 +63,7 @@ import "math/bits"
 type BitField struct {
 	pos  uint
 	msk  uint
+	reg  *Register
 	Enum []BitFieldEnum
 }
 
@@ -70,6 +71,15 @@ func (b BitField) Len() int   { return bits.OnesCount(b.msk) }
 func (b BitField) Msb() int   { return int(b.pos) + b.Len() - 1 }
 func (b BitField) Lsb() int   { return int(b.pos) }
 func (b BitField) Mask() uint { return b.msk }
+
+// Register gives us a back-reference to the register containing this bit field.
+// From it we can deduce contextual things. For example, if a bit field is only
+// 4 bits wide, but it belongs to a 32-bit register, we probably want to have a
+// 32-bit interface to the 4-bit field for compatibility with TinyGo's general
+// Register32.Get/Set methods.
+// We cannot know this without having some information about the register it
+// belongs to.
+func (b BitField) Register() *Register { return b.reg }
 
 type BitFieldEnum struct {
 	ident string
