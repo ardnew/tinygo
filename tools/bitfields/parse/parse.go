@@ -19,7 +19,7 @@ import (
 
 var (
 	ErrArgument          = errors.New("invalid argument")
-	ErrBitFieldSpec      = fmt.Errorf("%w: bit field specification", ErrArgument)
+	ErrFieldSpec         = fmt.Errorf("%w: bit field specification", ErrArgument)
 	ErrRegisterSpec      = fmt.Errorf("%w: register specification", ErrArgument)
 	ErrPeriphSpec        = fmt.Errorf("%w: peripheral specification", ErrArgument)
 	ErrUnspecifiedTarget = errors.New("no TinyGo target (-t) specified")
@@ -67,7 +67,7 @@ type Config struct {
 	Import []string
 
 	// TODO: godoc
-	Types typeSpec
+	Type typeSpec
 }
 
 type typeSpec map[string]map[string][]string
@@ -125,7 +125,7 @@ func (p *Parser) Parse() error {
 			return err
 		}
 		k.Periph = map[string]*Periph{}
-		for typ := range p.Config.Types {
+		for typ := range p.Config.Type {
 			k.Periph[periphIdent(typ)] = &Periph{}
 		}
 		p.Package[k.Json.ImportPath] = &k
@@ -139,7 +139,7 @@ func (p *Parser) Parse() error {
 			if err != nil {
 				return err
 			}
-			k.scan(file)
+			k.Scan(file)
 		}
 	}
 
@@ -150,7 +150,7 @@ func (c *Config) parse(arg ...string) error {
 
 	// TODO: replace manual string parsing with following regular expression:
 	//   (?P<peripheral>[^\s:]+)(?::(?P<register>[^\s:]*)(?::(?P<bitfields>[^\s:]*))?)?
-	c.Types = typeSpec{}
+	c.Type = typeSpec{}
 	for _, s := range arg {
 		es := strings.Split(s, ":")
 		bs := []string{}
@@ -164,7 +164,7 @@ func (c *Config) parse(arg ...string) error {
 			rs = es[1]
 		}
 		// Split will always return at least 1 element if sep is not empty.
-		if cr, ok := c.Types[es[0]]; ok {
+		if cr, ok := c.Type[es[0]]; ok {
 			// We already have this peripheral in the spec.
 			// Check if we have this register included with that peripheral.
 			if cb, ok := cr[rs]; ok {
@@ -189,10 +189,10 @@ func (c *Config) parse(arg ...string) error {
 				cr[rs] = bs
 			}
 			// Make sure the spec has the updated register.
-			c.Types[es[0]] = cr
+			c.Type[es[0]] = cr
 		} else {
 			// This is a new peripheral added to the spec.
-			c.Types[es[0]] = map[string][]string{rs: bs}
+			c.Type[es[0]] = map[string][]string{rs: bs}
 		}
 	}
 

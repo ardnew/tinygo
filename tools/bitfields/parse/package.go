@@ -17,12 +17,12 @@ type Package struct {
 	Periph map[string]*Periph
 }
 
-// scan performs a breadth-first traversal of the Go AST of a single file in
+// Scan performs a breadth-first traversal of the Go AST of a single file in
 // the receiver Package, collecting the registers from each requested peripheral
 // type, and the bit mask constants associated with those registers.
 //
 // The peripheral type must be declared at the file's outer-most lexical scope.
-func (p *Package) scan(f *ast.File) {
+func (p *Package) Scan(f *ast.File) {
 
 	// First locate our type definitions and gather all of their registers.
 	for _, decl := range f.Decls {
@@ -42,14 +42,14 @@ func (p *Package) scan(f *ast.File) {
 						if !t.Name.IsExported() {
 							continue
 						}
-						i := periphIdent(t.Name.Name)
-						if per, ok := p.Periph[i]; ok {
+						if per, ok := p.Periph[periphIdent(t.Name.Name)]; ok {
 							// Encountered a user-requested peripheral type. Initiate the AST
 							// depth-first search to identify each of its registers.
 							*per = Periph{
-								spec:      t,
-								ident:     i,
-								Registers: []Register{},
+								spec:     t,
+								ident:    t.Name.Name,
+								pkg:      p,
+								Register: []Register{},
 							}
 							ast.Walk(per.typeVisitor(), per.spec)
 						}
@@ -71,7 +71,7 @@ func (p *Package) scan(f *ast.File) {
 					case *ast.ValueSpec:
 						for i, n := range t.Names {
 
-							_, reg := p.bitFieldRegister(n.Name)
+							_, reg := p.fieldRegister(n.Name)
 							if reg == nil {
 								continue
 							}
@@ -98,7 +98,7 @@ func (p *Package) scan(f *ast.File) {
 									case bcBit:
 									case bcVal:
 										bf.Enum = append(bf.Enum,
-											BitFieldEnum{ident: bv, value: uint(cv)})
+											FieldEnum{ident: bv, value: uint(cv)})
 									}
 								}
 							}
@@ -114,16 +114,16 @@ func (p *Package) scan(f *ast.File) {
 	}
 }
 
-// bitFieldRegister returns the receiver Package's Periph and its Register
-// associated with the given bit field identifier s.
+// fieldRegister returns the receiver Package's Periph and Register associated
+// with the given bit field identifier s.
 //
-// See the godoc comment on type BitField for additional details.
-func (p *Package) bitFieldRegister(s string) (per *Periph, reg *Register) {
+// See the godoc comment on type Field for additional details.
+func (p *Package) fieldRegister(s string) (per *Periph, reg *Register) {
 	if p.Periph != nil {
 		for n, h := range p.Periph {
 			if strings.HasPrefix(s, n) {
 				per = h
-				reg = h.bitFieldRegister(s)
+				reg = h.fieldRegister(s)
 			}
 		}
 	}

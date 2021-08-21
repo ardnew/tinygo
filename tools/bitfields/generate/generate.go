@@ -1,34 +1,61 @@
 package generate
 
 import (
-	"log"
-	"os"
+	"io"
 	"text/template"
 	"time"
+
+	"github.com/tinygo-org/tinygo/tools/bitfields/parse"
 )
 
-const bitfieldsTemplate = `// Code generated {{.Now}} with {{.Generator}}; DO NOT EDIT.
+var FileHeader = template.Must(template.New("FILE-HEADER").Parse(
+	`// Code generated {{.Datetime}} with "{{.Config.Generator}}"; DO NOT EDIT.`))
 
-{{- define "BitField" -}}
-type BitField{{.}} interface {
-	Get() uint{{.}}
-	Set(v uint{{.}})
+var PeriphType = template.Must(template.New("PERIPH-TYPE").
+	Parse(`
+{{range $periph := .Periph}}{{range $reg := $periph.Register}}{{range $ident, $field := $reg.Field}}
+func (p *{{$periph.Ident}}) {{if eq $ident $reg.Ident}}{{$ident}}{{else}}{{$reg.Ident}}_{{$ident}}{{end}}(){{if eq 1 $field.Len}}{{- printf " bool {\n" -}}{{else -}}{{- printf " uint%d {\n" $field.Register.Bits -}}{{end -}}
+	{{"\t"}}return (p.{{$field.Register.Ident}}.Get() >> {{$field.Pos}}) & {{$field.Mask}}{{if eq 1 $field.Len}} == 1{{end}}
 }
-{{end}}
 
-{{template "BitField" 8}}
-{{template "BitField" 16}}
-{{template "BitField" 32}}
-{{template "BitField" 64}}
-`
-
-func Generate() {
-	t := template.Must(template.New("bitfields").Parse(bitfieldsTemplate))
-	err := t.Execute(os.Stdout, struct {
-		Now       time.Time
-		Generator string
-	}{Now: time.Now(), Generator: "tinygo.org/tinygo/tools/bitfields"})
-	if err != nil {
-		log.Println("executing template:", err)
+func (p *{{$periph.Ident}}) SET_{{if eq $ident $reg.Ident}}{{$ident}}{{else}}{{$reg.Ident}}_{{$ident}}{{end}}{{if eq 1 $field.Len}}{{- printf "(b bool) {\n" -}}{{else -}}{{- printf "(v uint%d) {\n" $field.Register.Bits -}}{{end -}}
+	{{"\t"}}{{if eq 1 $field.Len}}v := uint{{$field.Register.Bits}}(0)
+	if b {
+		v = 1
 	}
+	{{end}}p.{{$field.Register.Ident}}.ReplaceBits(v, {{$field.Mask}}, {{$field.Pos}})
+}
+{{end}}{{end}}{{end}}
+`))
+
+type Generator struct {
+	Config   Config
+	Datetime time.Time
+}
+
+type Config struct {
+	Generator string
+	Parser    *parse.Parser
+}
+
+func New(c Config) *Generator {
+	return &Generator{
+		Config:   c,
+		Datetime: time.Now(),
+	}
+}
+
+func (g *Generator) Run(w io.Writer) error {
+
+	if err := FileHeader.Execute(w, g); err != nil {
+		return err
+	}
+
+	for _, p := range g.Config.Parser.Package {
+		if err := PeriphType.Execute(w, p); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

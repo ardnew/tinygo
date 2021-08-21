@@ -8,16 +8,19 @@ type Register struct {
 	size    int
 	offset  int
 	comment string
-	Field   map[string]BitField
+	periph  *Periph
+	Field   map[string]Field
 }
 
 func (r *Register) Ident() string   { return r.ident }
 func (r *Register) Prefix() string  { return r.prefix }
 func (r *Register) Size() int       { return r.size }
+func (r *Register) Bits() int       { return r.size * 8 }
 func (r *Register) Offset() int     { return r.offset }
 func (r *Register) Comment() string { return r.comment }
+func (r *Register) Periph() *Periph { return r.periph }
 
-func (r *Register) parseConst(s string) (fld, val string, typ bitFieldConst) {
+func (r *Register) parseConst(s string) (fld, val string, typ fieldConst) {
 
 	name := strings.TrimPrefix(s, r.prefix)
 
@@ -39,7 +42,7 @@ func (r *Register) parseConst(s string) (fld, val string, typ bitFieldConst) {
 	return
 }
 
-func (r *Register) match(s string, c bitFieldConst) (bool, string) {
+func (r *Register) match(s string, c fieldConst) (bool, string) {
 	switch c {
 	case bcPos:
 		// TrimSuffix already tests if suffix exists, so don't duplicate effort.
@@ -54,7 +57,7 @@ func (r *Register) match(s string, c bitFieldConst) (bool, string) {
 
 	case bcBit:
 		// The bcBit constant identifiers consist only of the field name without any
-		// suffix. In which case, we should already have a BitField defined in our
+		// suffix. In which case, we should already have a Field defined in our
 		// receiver's Field map (for the bcPos and bcMsk constants).
 		//   TODO: Verify bcPos and bcMsk constants are defined lexically prior to
 		//         all bcBit and bcVal constants. I believe this is the case with
@@ -63,7 +66,7 @@ func (r *Register) match(s string, c bitFieldConst) (bool, string) {
 		return ok, s
 
 	case bcVal:
-		// Check each existing BitField on this register for the longest identifier
+		// Check each existing Field on this register for the longest identifier
 		// that is a prefix of our input string.
 		//   TODO: Like the bcBit note above, this logic depends on the enumerated
 		//         value constants (bcVal) to be defined after the bcPos and bcMsk
@@ -74,7 +77,7 @@ func (r *Register) match(s string, c bitFieldConst) (bool, string) {
 		for f := range r.Field {
 			g := strings.TrimPrefix(s, f)
 			if len(g) < len(s) && len(n) < len(f) {
-				// The current iterated BitField's identifier is a prefix of the given
+				// The current iterated Field's identifier is a prefix of the given
 				// const identifier, and it is the longest such prefix found so far.
 				n = f
 			}

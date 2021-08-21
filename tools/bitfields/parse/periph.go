@@ -8,9 +8,10 @@ import (
 )
 
 type Periph struct {
-	spec      *ast.TypeSpec
-	ident     string
-	Registers []Register
+	spec     *ast.TypeSpec
+	ident    string
+	pkg      *Package
+	Register []Register
 
 	// offset accumulates the size of each register field in a Periph struct
 	// visited via depth-first AST traversal.
@@ -19,6 +20,8 @@ type Periph struct {
 
 func (p *Periph) Spec() *ast.TypeSpec { return p.spec }
 func (p *Periph) Ident() string       { return p.ident }
+func (p *Periph) Name() string        { return periphIdent(p.ident) }
+func (p *Periph) Package() *Package   { return p.pkg }
 
 func (p *Periph) addRegister(f *ast.Field) (added int) {
 	if f != nil && f.Names != nil {
@@ -33,14 +36,15 @@ func (p *Periph) addRegister(f *ast.Field) (added int) {
 			// all fields, whether we keep them or not.
 			size := p.structFieldSize(f.Type)
 			if name.IsExported() {
-				p.Registers = append(p.Registers,
+				p.Register = append(p.Register,
 					Register{
 						ident:   name.Name,
-						prefix:  p.ident + "_" + name.Name + "_",
+						prefix:  periphIdent(p.ident, name.Name) + "_",
 						size:    size,
 						offset:  p.offset,
 						comment: commentText(f.Comment),
-						Field:   map[string]BitField{},
+						periph:  p,
+						Field:   map[string]Field{},
 					})
 				added += 1
 			}
@@ -50,14 +54,14 @@ func (p *Periph) addRegister(f *ast.Field) (added int) {
 	return
 }
 
-// bitFieldRegister returns the receiver Periph's Register whose Prefix field
-// is a prefix of the given bit field identifier s, or nil if no such Register
-// was found.
+// fieldRegister returns the receiver Periph's Register whose Prefix field is a
+// prefix of the given bit field identifier s, or nil if no such Register was
+// found.
 //
-// See the godoc comment on type BitField for additional details.
-func (p *Periph) bitFieldRegister(s string) *Register {
-	if p.Registers != nil {
-		for _, r := range p.Registers {
+// See the godoc comment on type Field for additional details.
+func (p *Periph) fieldRegister(s string) *Register {
+	if p.Register != nil {
+		for _, r := range p.Register {
 			if strings.HasPrefix(s, r.prefix) {
 				return &r
 			}
@@ -188,7 +192,12 @@ func (p periphTypeVisitor) Visit(n ast.Node) ast.Visitor {
 // TinyGo SVD-generated device descriptor. The base name is used to associate
 // types with their respective const bit field identifiers defined in the same
 // source file.
-func periphIdent(id string) string { return strings.TrimSuffix(id, "_Type") }
+func periphIdent(id string, r ...string) string {
+	if r != nil && len(r) > 0 {
+		return strings.Replace(id, "Type", r[0], 1)
+	}
+	return strings.TrimSuffix(id, "_Type")
+}
 
 func commentText(g *ast.CommentGroup) string {
 	if g == nil {

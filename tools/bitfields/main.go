@@ -40,7 +40,10 @@ func main() {
 			halt(err)
 		}
 
-		generate.Generate()
+		g := generate.New(generate.Config{Generator: IMPORT, Parser: p})
+		if err = g.Run(os.Stdout); err != nil {
+			halt(err)
+		}
 	}
 }
 
