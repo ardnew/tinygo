@@ -72,7 +72,7 @@ func (p *Package) Scan(f *ast.File) {
 						for i, n := range t.Names {
 
 							_, reg := p.fieldRegister(n.Name)
-							if reg == nil {
+							if reg == nil || reg.isBlank {
 								continue
 							}
 							bn, bv, bc := reg.parseConst(n.Name)

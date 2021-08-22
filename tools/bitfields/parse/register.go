@@ -5,6 +5,7 @@ import "strings"
 type Register struct {
 	ident   string
 	prefix  string
+	isBlank bool
 	size    int
 	offset  int
 	comment string
@@ -14,6 +15,7 @@ type Register struct {
 
 func (r *Register) Ident() string   { return r.ident }
 func (r *Register) Prefix() string  { return r.prefix }
+func (p *Register) IsBlank() bool   { return p.isBlank }
 func (r *Register) Size() int       { return r.size }
 func (r *Register) Bits() int       { return r.size * 8 }
 func (r *Register) Offset() int     { return r.offset }

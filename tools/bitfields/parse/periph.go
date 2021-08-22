@@ -40,6 +40,20 @@ func (p *Periph) addRegister(f *ast.Field) (added int) {
 					Register{
 						ident:   name.Name,
 						prefix:  periphIdent(p.ident, name.Name) + "_",
+						isBlank: false,
+						size:    size,
+						offset:  p.offset,
+						comment: commentText(f.Comment),
+						periph:  p,
+						Field:   map[string]Field{},
+					})
+				added += 1
+			} else if name.Name == "_" {
+				p.Register = append(p.Register,
+					Register{
+						ident:   "_",
+						prefix:  "_",
+						isBlank: true,
 						size:    size,
 						offset:  p.offset,
 						comment: commentText(f.Comment),
