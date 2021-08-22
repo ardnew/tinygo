@@ -21,7 +21,8 @@ var PeriphType = template.Must(template.New("PERIPH-TYPE").
 type {{.Ident}} struct {
 	//*{{.Package.Json.Name}}.{{.Ident}} // Remember to uncomment providing package's import statement
 	{{- range .Register}}{{if .IsBlank}}{{- printf "\n\t_ [%d]byte" .Size}}{{else}}{{- printf "\n\t%s %sType" .Ident .Prefix}}{{end}}{{end}}
-}{{end}}
+}
+{{end}}
 type (
 {{- range .Periph}}{{- range .Register}}{{if (not .IsBlank)}}{{- printf "\n\t%sType volatile.Register%d" .Prefix .Bits}}{{end}}{{end}}{{end}}
 )
@@ -35,8 +36,8 @@ func (r *{{$reg.Prefix}}Type) Set{{$ident}}{{if eq 1 $field.Len}}{{- printf "(b 
 		v = 1
 	}
 	{{end}}r.ReplaceBits(v, {{$field.Mask}}, {{$field.Pos}})
-}{{end}}
-{{end}}{{end}}{{end}}
+}
+{{end}}{{end}}{{end}}{{end}}
 `))
 
 //{{range .Register}}{{- printf "\t%s %sType\n" .Ident .Prefix -}}{{end}}}
