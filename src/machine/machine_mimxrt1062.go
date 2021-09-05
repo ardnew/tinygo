@@ -40,6 +40,9 @@ const (
 	// I2C
 	PinModeI2CSDA
 	PinModeI2CSCL
+
+	// FlexIO
+	PinModeFlexIO
 )
 
 type PinChange uint8
@@ -236,14 +239,49 @@ func (p Pin) getPort() Pin    { return Pin(p/32) * 32 }
 // Configure sets the GPIO pad and pin properties, and selects the appropriate
 // alternate function, for a given Pin and PinConfig.
 func (p Pin) Configure(config PinConfig) {
+
 	var (
+		// slew rate:
+		//   0 = slow
+		//   1 = fast
 		sre = uint32(0x01 << 0)
+		// drive strength:
+		//   0 = output driver disabled
+		//   1 = R0 (150 Ohm @ 3.3V, 260 Ohm @ 1.8V)
+		//   2 = R0/2
+		//   3 = R0/3
+		//   4 = R0/4
+		//   5 = R0/5
+		//   6 = R0/6
+		//   7 = R0/7
 		dse = func(n uint32) uint32 { return (n & 0x07) << 3 }
+		// speed:
+		//   0 = 50 MHz
+		//   1 = 100 MHz
+		//   2 = 100 MHz
+		//   3 = 200 MHz
 		spd = func(n uint32) uint32 { return (n & 0x03) << 6 }
+		// open drain enable:
+		//   0 = disable
+		//   1 = enable
 		ode = uint32(0x01 << 11)
+		// pull/keep enable:
+		//   0 = disable
+		//   1 = enable
 		pke = uint32(0x01 << 12)
+		// pull/keep select:
+		//   0 = keeper
+		//   1 = pull
 		pue = uint32(0x01 << 13)
+		// pull-up/down config:
+		//   0 = 100 kOhm pull-down
+		//   1 = 47 kOhm pull-up
+		//   2 = 100 kOhm pull-up
+		//   3 = 22 kOhm pull-up
 		pup = func(n uint32) uint32 { return (n & 0x03) << 14 }
+		// hysteresis enable:
+		//   0 = disable
+		//   1 = enable
 		hys = uint32(0x01 << 16)
 	)
 
@@ -299,7 +337,10 @@ func (p Pin) Configure(config PinConfig) {
 		pad.Set(dse(7))
 
 	case PinModeI2CSDA, PinModeI2CSCL:
-		pad.Set(ode | sre | dse(4) | spd(1) | pke | pue | pup(3))
+		pad.Set(sre | dse(4) | spd(1) | ode | pke | pue | pup(3))
+
+	case PinModeFlexIO:
+		pad.Set(dse(6) | spd(2) | pke)
 	}
 
 	// then configure the alternate function mux
@@ -867,6 +908,27 @@ func (p Pin) getMuxMode(config PinConfig) uint32 {
 			mode = uint32(1)
 		default:
 			panic("machine: invalid I2C SCL pin")
+		}
+		if forcePath {
+			mode |= 0x10 // SION bit
+		}
+		return mode
+
+	case PinModeFlexIO:
+		var mode uint32
+		switch p {
+		case PD4, PD5, PD6, PD8, PD7:
+			// FLEXIO1 always alternate function 4
+			mode = uint(4)
+		case PB10, PB17, PB16, PB11, PB0, PB2, PB1, PB3, PB12:
+			// FLEXIO2 always alternate function 4
+			mode = uint(4)
+		case PB17, PB16, PA18, PA19, PA23, PA22, PA17,
+			PA16, PA26, PA27, PA24, PA25, PA30, PA31:
+			// FLEXIO3 always alternate function 9
+			mode = uint(9)
+		default:
+			panic("machine: invalid FLEXIO pin")
 		}
 		if forcePath {
 			mode |= 0x10 // SION bit

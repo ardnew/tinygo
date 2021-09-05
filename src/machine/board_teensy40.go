@@ -18,8 +18,8 @@ const (
 	D4  = PD6  // [EMC_06]:    SEMC_DATA06      FLEXPWM2_PWMA00  SAI2_TX_BCLK     XBAR1_INOUT08   FLEXIO1_FLEXIO06      GPIO4_IO06   ~                     ~                      ~                      ~
 	D5  = PD8  // [EMC_08]:    SEMC_DM00        FLEXPWM2_PWMA01  SAI2_RX_DATA     XBAR1_INOUT17   FLEXIO1_FLEXIO08      GPIO4_IO08   ~                     ~                      ~                      ~
 	D6  = PB10 // [B0_10]:     LCD_DATA06       QTIMER4_TIMER1   FLEXPWM2_PWMA02  SAI1_TX_DATA03  FLEXIO2_FLEXIO10      GPIO2_IO10  SRC_BOOT_CFG06        ENET2_CRS               ~                      ~
-	D7  = PB17 // [B1_01]:     LCD_DATA13       XBAR1_INOUT15    LPUART4_RX       SAI1_TX_DATA00  FLEXIO2_FLEXIO17      GPIO2_IO17  FLEXPWM1_PWMB03       ENET2_RDATA00          FLEXIO3_FLEXIO17        ~
-	D8  = PB16 // [B1_00]:     LCD_DATA12       XBAR1_INOUT14    LPUART4_TX       SAI1_RX_DATA00  FLEXIO2_FLEXIO16      GPIO2_IO16  FLEXPWM1_PWMA03       ENET2_RX_ER            FLEXIO3_FLEXIO16        ~
+	D7  = PB17 // [B1_01]:     LCD_DATA13       XBAR1_INOUT15    LPUART4_RX       SAI1_TX_DATA00  FLEXIO2_FLEXIO17      GPIO2_IO17  FLEXPWM1_PWMB03       ENET2_RDATA00           ~                     FLEXIO3_FLEXIO17
+	D8  = PB16 // [B1_00]:     LCD_DATA12       XBAR1_INOUT14    LPUART4_TX       SAI1_RX_DATA00  FLEXIO2_FLEXIO16      GPIO2_IO16  FLEXPWM1_PWMA03       ENET2_RX_ER             ~                     FLEXIO3_FLEXIO16
 	D9  = PB11 // [B0_11]:     LCD_DATA07       QTIMER4_TIMER2   FLEXPWM2_PWMB02  SAI1_TX_DATA02  FLEXIO2_FLEXIO11      GPIO2_IO11  SRC_BOOT_CFG07        ENET2_COL               ~                      ~
 	D10 = PB0  // [B0_00]:     LCD_CLK          QTIMER1_TIMER0   MQS_RIGHT        LPSPI4_PCS0     FLEXIO2_FLEXIO00      GPIO2_IO00  SEMC_CSX01            ENET2_MDC               ~                      ~
 	D11 = PB2  // [B0_02]:     LCD_HSYNC        QTIMER1_TIMER2   FLEXCAN1_TX      LPSPI4_SDO      FLEXIO2_FLEXIO02      GPIO2_IO02  SEMC_CSX03            ENET2_1588_EVENT0_OUT   ~                      ~
@@ -33,8 +33,8 @@ const (
 	D19 = PA16 // [AD_B1_00]:  USB_OTG2_ID      QTIMER3_TIMER0   LPUART2_CTS_B    LPI2C1_SCL      WDOG1_B               GPIO1_IO16  USDHC1_WP             KPP_ROW07              ENET2_1588_EVENT0_OUT  FLEXIO3_FLEXIO00
 	D20 = PA26 // [AD_B1_10]:  FLEXSPIA_DATA03  WDOG1_B          LPUART8_TX       SAI1_RX_SYNC    CSI_DATA07            GPIO1_IO26  USDHC2_WP             KPP_ROW02              ENET2_1588_EVENT1_OUT  FLEXIO3_FLEXIO10
 	D21 = PA27 // [AD_B1_11]:  FLEXSPIA_DATA02  EWM_OUT_B        LPUART8_RX       SAI1_RX_BCLK    CSI_DATA06            GPIO1_IO27  USDHC2_RESET_B        KPP_COL02              ENET2_1588_EVENT1_IN   FLEXIO3_FLEXIO11
-	D22 = PA24 // [AD_B1_08]:  FLEXSPIA_SS1_B   FLEXPWM4_PWMA00  FLEXCAN1_TX      CCM_PMIC_READY  CSI_DATA09            GPIO1_IO24  USDHC2_CMD            KPP_ROW03              FLEXIO3_FLEXIO08        ~
-	D23 = PA25 // [AD_B1_09]:  FLEXSPIA_DQS     FLEXPWM4_PWMA01  FLEXCAN1_RX      SAI1_MCLK       CSI_DATA08            GPIO1_IO25  USDHC2_CLK            KPP_COL03              FLEXIO3_FLEXIO09        ~
+	D22 = PA24 // [AD_B1_08]:  FLEXSPIA_SS1_B   FLEXPWM4_PWMA00  FLEXCAN1_TX      CCM_PMIC_READY  CSI_DATA09            GPIO1_IO24  USDHC2_CMD            KPP_ROW03               ~                     FLEXIO3_FLEXIO08
+	D23 = PA25 // [AD_B1_09]:  FLEXSPIA_DQS     FLEXPWM4_PWMA01  FLEXCAN1_RX      SAI1_MCLK       CSI_DATA08            GPIO1_IO25  USDHC2_CLK            KPP_COL03               ~                     FLEXIO3_FLEXIO09
 	D24 = PA12 // [AD_B0_12]:  LPI2C4_SCL       CCM_PMIC_READY   LPUART1_TX       WDOG2_WDOG_B    FLEXPWM1_PWMX02       GPIO1_IO12  ENET_1588_EVENT1_OUT  NMI_GLUE_NMI            ~                      ~
 	D25 = PA13 // [AD_B0_13]:  LPI2C4_SDA       GPT1_CLK         LPUART1_RX       EWM_OUT_B       FLEXPWM1_PWMX03       GPIO1_IO13  ENET_1588_EVENT1_IN   REF_CLK_24M             ~                      ~
 	D26 = PA30 // [AD_B1_14]:  FLEXSPIA_SCLK    ACMP_OUT02       LPSPI3_SDO       SAI1_TX_BCLK    CSI_DATA03            GPIO1_IO30  USDHC2_DATA6          KPP_ROW00              ENET2_1588_EVENT3_OUT  FLEXIO3_FLEXIO14
@@ -87,6 +87,8 @@ const (
 	I2C_SDA_PIN = I2C1_SDA_PIN // D18/A4
 	I2C_SCL_PIN = I2C1_SCL_PIN // D19/A5
 )
+
+var SmartMatrix = nxp.FlexIO[1] // FLEXIO2
 
 func init() {
 	// register any interrupt handlers for this board's peripherals

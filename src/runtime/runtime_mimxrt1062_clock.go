@@ -214,7 +214,7 @@ func initClocks() {
 	//   PFD0 = 396    MHz -> USDHC1/USDHC2(DIV2)=198 MHz
 	//   PFD1 = 594    MHz -> (currently unused)
 	//   PFD2 = 327.72 MHz -> SEMC(DIV2)=163.86 MHz, FlexSPI/FlexSPI2=327.72 MHz
-	//   PFD3 = 454.73 MHz -> (currently unused)
+	//   PFD3 = 594    MHz -> (currently unused)
 	SysPllConfig.Configure(24, 16, 29, 16) // init SYS PLL and PFDs
 
 	// USB1 PLL (PLL3) @ 480 MHz

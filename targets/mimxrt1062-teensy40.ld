@@ -8,8 +8,7 @@ MEMORY
 
 ENTRY(Reset_Handler);
 
-_stack_size = 128K;
-_heap_size = 512K;
+_stack_size = 8K;
 
 SECTIONS
 {
@@ -86,6 +85,13 @@ SECTIONS
 
   } > DTCM AT > DTCM
 
+  .bss.dma (NOLOAD) : {
+
+    *(.dmabuffer);
+    . = ALIGN(32);
+
+  } > RAM
+
   /DISCARD/ : {
 
     *(.ARM.exidx*); /* causes spurious 'undefined reference' errors */
@@ -94,7 +100,7 @@ SECTIONS
 
   _sidata = LOADADDR(.data);
 
-  _heap_start = ORIGIN(RAM);
+  _heap_start = ADDR(.bss.dma) + SIZEOF(.bss.dma);
   _heap_end = ORIGIN(RAM) + LENGTH(RAM);
 
   _globals_start = _sdata;
