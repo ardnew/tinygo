@@ -17,7 +17,8 @@ type FlexIO struct {
 
 	dmaChannel [NumFlexShifters]uint8
 
-	usedTimers uint32
+	usedTimers   uint32
+	usedShifters uint32
 }
 
 const (
@@ -25,11 +26,11 @@ const (
 
 	NumFlexPins = 14 // Teensy 4.1 = 22, MicroMod = 15
 
-	NumFlexShifters = 8
 	NumFlexTimers   = 8
+	NumFlexShifters = 8
 )
 
-var FlexIO = [NumFlexIO]FlexIO{
+var flexIO = [NumFlexIO]FlexIO{
 	{
 		FLEXIO_Type: FLEXIO1,
 		dmaChannel: [NumFlexShifters]uint8{
@@ -56,8 +57,9 @@ var FlexIO = [NumFlexIO]FlexIO{
 }
 
 var (
-	ErrFlexIOCallbackFull = errors.New("no more callbacks can be added to FLEXIO interrupt handler")
-	ErrFlexIOTimersFull   = errors.New("insufficient FLEXIO timers available")
+	ErrFlexIOLimitCallbacks = errors.New("insufficient FLEXIO callbacks available")
+	ErrFlexIOLimitTimers    = errors.New("insufficient FLEXIO timers available")
+	ErrFlexIOLimitShifters  = errors.New("insufficient FLEXIO shifters available")
 )
 
 const (
@@ -86,7 +88,7 @@ func (f *FlexIO) handleInterrupt(interrupt.Interrupt) {
 	`, nil)
 }
 
-func (f *FlexIO) addHandler(h func()) error {
+func (f *FlexIO) addHandler(h func() bool) error {
 	for i, c := range f.callback {
 		if c == nil {
 			f.callback[i] = h
@@ -94,12 +96,12 @@ func (f *FlexIO) addHandler(h func()) error {
 			if f.interrupt == nil {
 				var irq interrupt.Interrupt
 				switch f {
-				case &FlexIO1:
-					irq = interrupt.New(IRQ_FLEXIO1, f.handleInterrupt)
-				case &FlexIO2:
-					irq = interrupt.New(IRQ_FLEXIO2, f.handleInterrupt)
-				case &FlexIO3:
-					irq = interrupt.New(IRQ_FLEXIO3, f.handleInterrupt)
+				case &flexIO[0]:
+					irq = interrupt.New(IRQ_FLEXIO1, flexIO[0].handleInterrupt)
+				case &flexIO[1]:
+					irq = interrupt.New(IRQ_FLEXIO2, flexIO[1].handleInterrupt)
+				case &flexIO[2]:
+					irq = interrupt.New(IRQ_FLEXIO3, flexIO[2].handleInterrupt)
 				}
 				f.interrupt = &irq
 				f.interrupt.Enable()
@@ -107,15 +109,15 @@ func (f *FlexIO) addHandler(h func()) error {
 			return nil
 		}
 	}
-	return ErrFlexIOCallbackFull
+	return ErrFlexIOLimitCallbacks
 }
 
 func (f *FlexIO) requestTimers(n int) (uint32, error) {
+	if n > 0 && n+bits.OnesCount32(f.usedTimers) > NumFlexTimers {
+		return 0, ErrFlexIOLimitTimers
+	}
 	var timers uint32
 	for n > 0 {
-		if uint32(n)+bits.OnesCount32(f.usedTimers) > NumFlexTimers {
-			return ErrFlexIOTimersFull
-		}
 		for i := uint32(0); i < NumFlexTimers; i++ {
 			m := uint32(1) << i
 			if (f.usedTimers & m) == 0 {
@@ -127,4 +129,29 @@ func (f *FlexIO) requestTimers(n int) (uint32, error) {
 	}
 	f.usedTimers |= timers
 	return timers, nil
+}
+
+func (f *FlexIO) requestShifter(excludeChannel ...uint8) (uint32, error) {
+	if bits.OnesCount32(f.usedShifters) >= NumFlexShifters {
+		return 0, ErrFlexIOLimitShifters
+	}
+	var shifter uint32
+	for i := uint32(0); i < NumFlexShifters; i++ {
+		m := uint32(1) << i
+		if (f.usedShifters & m) == 0 {
+			exclude := false
+			for _, x := range excludeChannel {
+				if f.dmaChannel[i] == x {
+					exclude = true
+					break
+				}
+			}
+			if !exclude {
+				shifter |= m
+				break
+			}
+		}
+	}
+	f.usedShifters |= shifter
+	return shifter, nil
 }
