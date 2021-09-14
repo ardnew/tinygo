@@ -202,10 +202,13 @@ func initClocks() {
 	nxp.DivIpFlexio1Pre.Div(1)       // divide FLEXIO1_CLK_PRED (DIV2)
 	nxp.DivIpFlexio1.Div(7)          // divide FLEXIO1_CLK_PODF (DIV8)
 	nxp.MuxIpFlexio1.Mux(3)          // FLEXIO1 select PLL3_SW
+	                                 //  ** FLEXIO1 configured for 30 MHz **
 	nxp.ClockIpFlexio2.Enable(false) // disable FLEXIO2
 	nxp.DivIpFlexio2Pre.Div(1)       // divide FLEXIO2_CLK_PRED (DIV2)
-	nxp.DivIpFlexio2.Div(7)          // divide FLEXIO2_CLK_PODF (DIV8)
-	nxp.MuxIpFlexio2.Mux(3)          // FLEXIO2 select PLL3_SW
+	nxp.DivIpFlexio2.Div(1)          // divide FLEXIO2_CLK_PODF (DIV2)
+	nxp.MuxIpFlexio2.Mux(3)          // FLEXIO2 select PLL3_SW (will be 120 MHz)
+                                   //  ** FLEXIO2(3) configured for 120 MHz **
+																	 //    (FLEXIO3 shares clock with FLEXIO2)
 
 	nxp.MuxIpPll3Sw.Mux(0) // PLL3_SW select PLL3_MAIN
 

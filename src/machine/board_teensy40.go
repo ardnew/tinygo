@@ -88,8 +88,6 @@ const (
 	I2C_SCL_PIN = I2C1_SCL_PIN // D19/A5
 )
 
-var SmartMatrix = nxp.FlexIO[1] // FLEXIO2
-
 func init() {
 	// register any interrupt handlers for this board's peripherals
 	UART1.Interrupt = interrupt.New(nxp.IRQ_LPUART6, _UART1.handleInterrupt)

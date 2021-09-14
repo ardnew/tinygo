@@ -41,8 +41,9 @@ const (
 	PinModeI2CSDA
 	PinModeI2CSCL
 
-	// FlexIO
+	// FlexIO/PWM
 	PinModeFlexIO
+	PinModeFlexPWM
 )
 
 type PinChange uint8
@@ -123,8 +124,8 @@ const (
 	PA21 = portA + 21 // [AD_B1_05]: FLEXSPIB_DATA02  ENET_MDIO        LPUART3_RTS_B        SPDIF_OUT             CSI_MCLK              GPIO1_IO21   USDHC2_DATA1          KPP_COL05             GPT2_COMPARE1          FLEXIO3_FLEXIO05
 	PA22 = portA + 22 // [AD_B1_06]: FLEXSPIB_DATA01  LPI2C3_SDA       LPUART3_TX           SPDIF_LOCK            CSI_VSYNC             GPIO1_IO22   USDHC2_DATA2          KPP_ROW04             GPT2_COMPARE2          FLEXIO3_FLEXIO06
 	PA23 = portA + 23 // [AD_B1_07]: FLEXSPIB_DATA00  LPI2C3_SCL       LPUART3_RX           SPDIF_EXT_CLK         CSI_HSYNC             GPIO1_IO23   USDHC2_DATA3          KPP_COL04             GPT2_COMPARE3          FLEXIO3_FLEXIO07
-	PA24 = portA + 24 // [AD_B1_08]: FLEXSPIA_SS1_B   FLEXPWM4_PWMA00  FLEXCAN1_TX          CCM_PMIC_READY        CSI_DATA09            GPIO1_IO24   USDHC2_CMD            KPP_ROW03             FLEXIO3_FLEXIO08        ~
-	PA25 = portA + 25 // [AD_B1_09]: FLEXSPIA_DQS     FLEXPWM4_PWMA01  FLEXCAN1_RX          SAI1_MCLK             CSI_DATA08            GPIO1_IO25   USDHC2_CLK            KPP_COL03             FLEXIO3_FLEXIO09        ~
+	PA24 = portA + 24 // [AD_B1_08]: FLEXSPIA_SS1_B   FLEXPWM4_PWMA00  FLEXCAN1_TX          CCM_PMIC_READY        CSI_DATA09            GPIO1_IO24   USDHC2_CMD            KPP_ROW03              ~                     FLEXIO3_FLEXIO08
+	PA25 = portA + 25 // [AD_B1_09]: FLEXSPIA_DQS     FLEXPWM4_PWMA01  FLEXCAN1_RX          SAI1_MCLK             CSI_DATA08            GPIO1_IO25   USDHC2_CLK            KPP_COL03              ~                     FLEXIO3_FLEXIO09
 	PA26 = portA + 26 // [AD_B1_10]: FLEXSPIA_DATA03  WDOG1_B          LPUART8_TX           SAI1_RX_SYNC          CSI_DATA07            GPIO1_IO26   USDHC2_WP             KPP_ROW02             ENET2_1588_EVENT1_OUT  FLEXIO3_FLEXIO10
 	PA27 = portA + 27 // [AD_B1_11]: FLEXSPIA_DATA02  EWM_OUT_B        LPUART8_RX           SAI1_RX_BCLK          CSI_DATA06            GPIO1_IO27   USDHC2_RESET_B        KPP_COL02             ENET2_1588_EVENT1_IN   FLEXIO3_FLEXIO11
 	PA28 = portA + 28 // [AD_B1_12]: FLEXSPIA_DATA01  ACMP_OUT00       LPSPI3_PCS0          SAI1_RX_DATA00        CSI_DATA05            GPIO1_IO28   USDHC2_DATA4          KPP_ROW01             ENET2_1588_EVENT2_OUT  FLEXIO3_FLEXIO12
@@ -148,22 +149,22 @@ const (
 	PB13 = portB + 13 // [B0_13]:    LCD_DATA09       XBAR1_INOUT11    ARM_TRACE_SWO        SAI1_MCLK             FLEXIO2_FLEXIO13      GPIO2_IO13   SRC_BOOT_CFG09        ENET2_TDATA01          ~                      ~
 	PB14 = portB + 14 // [B0_14]:    LCD_DATA10       XBAR1_INOUT12    ARM_TXEV             SAI1_RX_SYNC          FLEXIO2_FLEXIO14      GPIO2_IO14   SRC_BOOT_CFG10        ENET2_TX_EN            ~                      ~
 	PB15 = portB + 15 // [B0_15]:    LCD_DATA11       XBAR1_INOUT13    ARM_RXEV             SAI1_RX_BCLK          FLEXIO2_FLEXIO15      GPIO2_IO15   SRC_BOOT_CFG11        ENET2_TX_CLK          ENET2_REF_CLK2          ~
-	PB16 = portB + 16 // [B1_00]:    LCD_DATA12       XBAR1_INOUT14    LPUART4_TX           SAI1_RX_DATA00        FLEXIO2_FLEXIO16      GPIO2_IO16   FLEXPWM1_PWMA03       ENET2_RX_ER           FLEXIO3_FLEXIO16        ~
-	PB17 = portB + 17 // [B1_01]:    LCD_DATA13       XBAR1_INOUT15    LPUART4_RX           SAI1_TX_DATA00        FLEXIO2_FLEXIO17      GPIO2_IO17   FLEXPWM1_PWMB03       ENET2_RDATA00         FLEXIO3_FLEXIO17        ~
-	PB18 = portB + 18 // [B1_02]:    LCD_DATA14       XBAR1_INOUT16    LPSPI4_PCS2          SAI1_TX_BCLK          FLEXIO2_FLEXIO18      GPIO2_IO18   FLEXPWM2_PWMA03       ENET2_RDATA01         FLEXIO3_FLEXIO18        ~
-	PB19 = portB + 19 // [B1_03]:    LCD_DATA15       XBAR1_INOUT17    LPSPI4_PCS1          SAI1_TX_SYNC          FLEXIO2_FLEXIO19      GPIO2_IO19   FLEXPWM2_PWMB03       ENET2_RX_EN           FLEXIO3_FLEXIO19        ~
-	PB20 = portB + 20 // [B1_04]:    LCD_DATA16       LPSPI4_PCS0      CSI_DATA15           ENET_RX_DATA00        FLEXIO2_FLEXIO20      GPIO2_IO20   GPT1_CLK              FLEXIO3_FLEXIO20       ~                      ~
-	PB21 = portB + 21 // [B1_05]:    LCD_DATA17       LPSPI4_SDI       CSI_DATA14           ENET_RX_DATA01        FLEXIO2_FLEXIO21      GPIO2_IO21   GPT1_CAPTURE1         FLEXIO3_FLEXIO21       ~                      ~
-	PB22 = portB + 22 // [B1_06]:    LCD_DATA18       LPSPI4_SDO       CSI_DATA13           ENET_RX_EN            FLEXIO2_FLEXIO22      GPIO2_IO22   GPT1_CAPTURE2         FLEXIO3_FLEXIO22       ~                      ~
-	PB23 = portB + 23 // [B1_07]:    LCD_DATA19       LPSPI4_SCK       CSI_DATA12           ENET_TX_DATA00        FLEXIO2_FLEXIO23      GPIO2_IO23   GPT1_COMPARE1         FLEXIO3_FLEXIO23       ~                      ~
-	PB24 = portB + 24 // [B1_08]:    LCD_DATA20       QTIMER1_TIMER3   CSI_DATA11           ENET_TX_DATA01        FLEXIO2_FLEXIO24      GPIO2_IO24   FLEXCAN2_TX           GPT1_COMPARE2         FLEXIO3_FLEXIO24        ~
-	PB25 = portB + 25 // [B1_09]:    LCD_DATA21       QTIMER2_TIMER3   CSI_DATA10           ENET_TX_EN            FLEXIO2_FLEXIO25      GPIO2_IO25   FLEXCAN2_RX           GPT1_COMPARE3         FLEXIO3_FLEXIO25        ~
-	PB26 = portB + 26 // [B1_10]:    LCD_DATA22       QTIMER3_TIMER3   CSI_DATA00           ENET_TX_CLK           FLEXIO2_FLEXIO26      GPIO2_IO26   ENET_REF_CLK          FLEXIO3_FLEXIO26       ~                      ~
-	PB27 = portB + 27 // [B1_11]:    LCD_DATA23       QTIMER4_TIMER3   CSI_DATA01           ENET_RX_ER            FLEXIO2_FLEXIO27      GPIO2_IO27   LPSPI4_PCS3           FLEXIO3_FLEXIO27       ~                      ~
-	PB28 = portB + 28 // [B1_12]:    LPUART5_TX       CSI_PIXCLK       ENET_1588_EVENT0_IN  FLEXIO2_FLEXIO28      GPIO2_IO28            USDHC1_CD_B  FLEXIO3_FLEXIO28       ~                     ~                      ~
-	PB29 = portB + 29 // [B1_13]:    WDOG1_B          LPUART5_RX       CSI_VSYNC            ENET_1588_EVENT0_OUT  FLEXIO2_FLEXIO29      GPIO2_IO29   USDHC1_WP             SEMC_DQS4             FLEXIO3_FLEXIO29        ~
-	PB30 = portB + 30 // [B1_14]:    ENET_MDC         FLEXPWM4_PWMA02  CSI_HSYNC            XBAR1_IN02            FLEXIO2_FLEXIO30      GPIO2_IO30   USDHC1_VSELECT        ENET2_TDATA00         FLEXIO3_FLEXIO30        ~
-	PB31 = portB + 31 // [B1_15]:    ENET_MDIO        FLEXPWM4_PWMA03  CSI_MCLK             XBAR1_IN03            FLEXIO2_FLEXIO31      GPIO2_IO31   USDHC1_RESET_B        ENET2_TDATA01         FLEXIO3_FLEXIO31        ~
+	PB16 = portB + 16 // [B1_00]:    LCD_DATA12       XBAR1_INOUT14    LPUART4_TX           SAI1_RX_DATA00        FLEXIO2_FLEXIO16      GPIO2_IO16   FLEXPWM1_PWMA03       ENET2_RX_ER            ~                     FLEXIO3_FLEXIO16
+	PB17 = portB + 17 // [B1_01]:    LCD_DATA13       XBAR1_INOUT15    LPUART4_RX           SAI1_TX_DATA00        FLEXIO2_FLEXIO17      GPIO2_IO17   FLEXPWM1_PWMB03       ENET2_RDATA00          ~                     FLEXIO3_FLEXIO17
+	PB18 = portB + 18 // [B1_02]:    LCD_DATA14       XBAR1_INOUT16    LPSPI4_PCS2          SAI1_TX_BCLK          FLEXIO2_FLEXIO18      GPIO2_IO18   FLEXPWM2_PWMA03       ENET2_RDATA01          ~                     FLEXIO3_FLEXIO18
+	PB19 = portB + 19 // [B1_03]:    LCD_DATA15       XBAR1_INOUT17    LPSPI4_PCS1          SAI1_TX_SYNC          FLEXIO2_FLEXIO19      GPIO2_IO19   FLEXPWM2_PWMB03       ENET2_RX_EN            ~                     FLEXIO3_FLEXIO19
+	PB20 = portB + 20 // [B1_04]:    LCD_DATA16       LPSPI4_PCS0      CSI_DATA15           ENET_RX_DATA00        FLEXIO2_FLEXIO20      GPIO2_IO20   GPT1_CLK               ~                     ~                     FLEXIO3_FLEXIO20
+	PB21 = portB + 21 // [B1_05]:    LCD_DATA17       LPSPI4_SDI       CSI_DATA14           ENET_RX_DATA01        FLEXIO2_FLEXIO21      GPIO2_IO21   GPT1_CAPTURE1          ~                     ~                     FLEXIO3_FLEXIO21
+	PB22 = portB + 22 // [B1_06]:    LCD_DATA18       LPSPI4_SDO       CSI_DATA13           ENET_RX_EN            FLEXIO2_FLEXIO22      GPIO2_IO22   GPT1_CAPTURE2          ~                     ~                     FLEXIO3_FLEXIO22
+	PB23 = portB + 23 // [B1_07]:    LCD_DATA19       LPSPI4_SCK       CSI_DATA12           ENET_TX_DATA00        FLEXIO2_FLEXIO23      GPIO2_IO23   GPT1_COMPARE1          ~                     ~                     FLEXIO3_FLEXIO23
+	PB24 = portB + 24 // [B1_08]:    LCD_DATA20       QTIMER1_TIMER3   CSI_DATA11           ENET_TX_DATA01        FLEXIO2_FLEXIO24      GPIO2_IO24   FLEXCAN2_TX           GPT1_COMPARE2          ~                     FLEXIO3_FLEXIO24
+	PB25 = portB + 25 // [B1_09]:    LCD_DATA21       QTIMER2_TIMER3   CSI_DATA10           ENET_TX_EN            FLEXIO2_FLEXIO25      GPIO2_IO25   FLEXCAN2_RX           GPT1_COMPARE3          ~                     FLEXIO3_FLEXIO25
+	PB26 = portB + 26 // [B1_10]:    LCD_DATA22       QTIMER3_TIMER3   CSI_DATA00           ENET_TX_CLK           FLEXIO2_FLEXIO26      GPIO2_IO26   ENET_REF_CLK           ~                     ~                     FLEXIO3_FLEXIO26
+	PB27 = portB + 27 // [B1_11]:    LCD_DATA23       QTIMER4_TIMER3   CSI_DATA01           ENET_RX_ER            FLEXIO2_FLEXIO27      GPIO2_IO27   LPSPI4_PCS3            ~                     ~                     FLEXIO3_FLEXIO27
+	PB28 = portB + 28 // [B1_12]:     ~               LPUART5_TX       CSI_PIXCLK           ENET_1588_EVENT0_IN   FLEXIO2_FLEXIO28      GPIO2_IO28   USDHC1_CD_B            ~                     ~                     FLEXIO3_FLEXIO28
+	PB29 = portB + 29 // [B1_13]:    WDOG1_B          LPUART5_RX       CSI_VSYNC            ENET_1588_EVENT0_OUT  FLEXIO2_FLEXIO29      GPIO2_IO29   USDHC1_WP             SEMC_DQS4              ~                     FLEXIO3_FLEXIO29
+	PB30 = portB + 30 // [B1_14]:    ENET_MDC         FLEXPWM4_PWMA02  CSI_HSYNC            XBAR1_IN02            FLEXIO2_FLEXIO30      GPIO2_IO30   USDHC1_VSELECT        ENET2_TDATA00          ~                     FLEXIO3_FLEXIO30
+	PB31 = portB + 31 // [B1_15]:    ENET_MDIO        FLEXPWM4_PWMA03  CSI_MCLK             XBAR1_IN03            FLEXIO2_FLEXIO31      GPIO2_IO31   USDHC1_RESET_B        ENET2_TDATA01          ~                     FLEXIO3_FLEXIO31
 
 	PC0  = portC + 0  // [SD_B1_00]: USDHC2_DATA3     FLEXSPIB_DATA03  FLEXPWM1_PWMA03      SAI1_TX_DATA03        LPUART4_TX            GPIO3_IO00   SAI3_RX_DATA           ~                     ~                      ~
 	PC1  = portC + 1  // [SD_B1_01]: USDHC2_DATA2     FLEXSPIB_DATA02  FLEXPWM1_PWMB03      SAI1_TX_DATA02        LPUART4_RX            GPIO3_IO01   SAI3_TX_DATA           ~                     ~                      ~
@@ -340,7 +341,7 @@ func (p Pin) Configure(config PinConfig) {
 		pad.Set(sre | dse(4) | spd(1) | ode | pke | pue | pup(3))
 
 	case PinModeFlexIO:
-		pad.Set(dse(6) | spd(2) | pke)
+		pad.Set(sre | dse(7) | spd(3))
 	}
 
 	// then configure the alternate function mux
@@ -802,8 +803,7 @@ func (p Pin) getMuxMode(config PinConfig) uint32 {
 
 	// UART RX/TX
 	case PinModeUARTRX, PinModeUARTTX:
-		mode := uint32(0x2) // UART is always alternate function 2 on Teensy 4.0
-		// TODO: Teensy 4.1 has a UART (LPUART5) with alternate function 1
+		mode := uint32(0x2) // UART is always alternate function 2
 		return mode
 
 	// SPI SDI
@@ -917,16 +917,25 @@ func (p Pin) getMuxMode(config PinConfig) uint32 {
 	case PinModeFlexIO:
 		var mode uint32
 		switch p {
-		case PD4, PD5, PD6, PD8, PD7:
+		case PD4, PD5, PD6, PD7, PD8:
 			// FLEXIO1 always alternate function 4
-			mode = uint(4)
-		case PB10, PB17, PB16, PB11, PB0, PB2, PB1, PB3, PB12:
+			mode = uint32(4)
+		case PB0, PB1, PB2, PB3, PB4, PB5, PB6, PB7,
+			PB8, PB9, PB10, PB11, PB12, PB13, PB14, PB15,
+			// BUG:
+			// The following are connected to both FLEXIO2 and FLEXIO3. There is
+			// currently no way to route them to FLEXIO3 as we only define a single
+			// PinMode (PinModeFlexIO). I'm defaulting the mux configuration to use
+			// FLEXIO2 because its the only one that is DMA-capable, and its the only
+			// one I currently have a use case for (SmartMatrix SmartLED shield).
+			PB16, PB17, PB18, PB19, PB20, PB21, PB22, PB23,
+			PB24, PB25, PB26, PB27, PB28, PB29, PB30, PB31:
 			// FLEXIO2 always alternate function 4
-			mode = uint(4)
-		case PB17, PB16, PA18, PA19, PA23, PA22, PA17,
-			PA16, PA26, PA27, PA24, PA25, PA30, PA31:
+			mode = uint32(4)
+		case PA16, PA17, PA18, PA19, PA20, PA21, PA22, PA23,
+			PA24, PA25, PA26, PA27, PA28, PA29, PA30, PA31:
 			// FLEXIO3 always alternate function 9
-			mode = uint(9)
+			mode = uint32(9)
 		default:
 			panic("machine: invalid FLEXIO pin")
 		}
