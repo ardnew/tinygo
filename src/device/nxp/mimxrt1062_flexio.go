@@ -11,6 +11,8 @@ import (
 type FlexIO struct {
 	*FLEXIO_Type // structure containing all peripheral registers.
 
+	flexIOID FlexIOID
+
 	busClock Clock
 
 	interruptEnabled bool
@@ -22,6 +24,16 @@ type FlexIO struct {
 	usedTimers   uint32
 	usedShifters uint32
 }
+
+type FlexIOID uint32
+
+// Enumerated constant values for each FlexIO hardware peripheral. Each FlexIO
+// instance can be referred to by its corresponding FlexIOID number.
+const (
+	FIO1 FlexIOID = 1 << iota
+	FIO2
+	FIO3
+)
 
 const (
 	NumFlexIO = 3 // number of FlexIO peripherals of iMXRT1062
@@ -35,6 +47,7 @@ const (
 var (
 	FlexIO1 = FlexIO{
 		FLEXIO_Type: FLEXIO1,
+		flexIOID:    FIO1,
 		dmaChannel: [NumFlexShifters]uint8{
 			dmaSourceFlexIO1Req0, dmaSourceFlexIO1Req1,
 			dmaSourceFlexIO1Req2, dmaSourceFlexIO1Req3,
@@ -43,6 +56,7 @@ var (
 	}
 	FlexIO2 = FlexIO{
 		FLEXIO_Type: FLEXIO2,
+		flexIOID:    FIO2,
 		dmaChannel: [NumFlexShifters]uint8{
 			dmaSourceFlexIO2Req0, dmaSourceFlexIO2Req1,
 			dmaSourceFlexIO2Req2, dmaSourceFlexIO2Req3,
@@ -51,12 +65,12 @@ var (
 	}
 	FlexIO3 = FlexIO{
 		FLEXIO_Type: FLEXIO3,
+		flexIOID:    FIO3,
 		dmaChannel: [NumFlexShifters]uint8{
 			dmaSourceNONE, dmaSourceNONE, dmaSourceNONE, dmaSourceNONE,
 			dmaSourceNONE, dmaSourceNONE, dmaSourceNONE, dmaSourceNONE,
 		},
 	}
-	_FlexIO = []*FlexIO{&FlexIO1, &FlexIO2, &FlexIO3}
 )
 
 var (
@@ -198,7 +212,7 @@ func (f *FlexIO) Configure(reg *volatile.Register32, config FlexIOConfig) error 
 	return nil
 }
 
-type FlexIOShifterControl struct {
+type ShifterControl struct {
 	TimSel uint32
 	TimPol uint32
 	PinCfg uint32
