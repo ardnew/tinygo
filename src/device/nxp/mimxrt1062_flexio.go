@@ -212,7 +212,7 @@ func (f *FlexIO) Configure(reg *volatile.Register32, config FlexIOConfig) error 
 	return nil
 }
 
-type ShifterControl struct {
+type FlexIOShifterControl struct {
 	TimSel uint32
 	TimPol uint32
 	PinCfg uint32
