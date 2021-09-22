@@ -1,3 +1,9 @@
+// Hand created file. DO NOT DELETE.
+// Type definitions, fields, and constants associated with FlexIO peripherals of
+// the NXP MIMXRT1062.
+
+//go:build nxp && mimxrt1062
+
 package nxp
 
 import (
@@ -6,24 +12,44 @@ import (
 	"math/bits"
 	"runtime/interrupt"
 	"runtime/volatile"
+	"unsafe"
+)
+
+var (
+	ErrFlexIOLimitCallbacks  = errors.New("insufficient FlexIO callbacks available")
+	ErrFlexIOLimitTimers     = errors.New("insufficient FlexIO timers available")
+	ErrFlexIOLimitShifters   = errors.New("insufficient FlexIO shifters available")
+	ErrFlexIOTimerIndex      = errors.New("invalid FlexIO timer index")
+	ErrFlexIOShifterIndex    = errors.New("invalid FlexIO shifter index")
+	ErrFlexIOInvalidRegister = errors.New("invalid FlexIO register")
+	ErrFlexIOInvalidConfig   = errors.New("invalid FlexIO configuration register")
+	ErrFlexIOInvalidControl  = errors.New("invalid FlexIO control register")
 )
 
 type FlexIO struct {
 	*FLEXIO_Type // structure containing all peripheral registers.
 
-	flexIOID FlexIOID
-
-	busClock Clock
+	id FlexIOID
 
 	interruptEnabled bool
 	interrupt        interrupt.Interrupt
-	callback         [NumFlexTimers]func() bool
+	callback         [NumFlexIOTimers]func() bool
 
-	dmaChannel [NumFlexShifters]uint8
+	dmaChannel [NumFlexIOShifters]uint8
 
 	usedTimers   uint32
 	usedShifters uint32
 }
+
+const (
+	NumFlexIO = 3 // number of FlexIO peripherals of iMXRT1062
+
+	NumFlexIOTimers   = 8
+	NumFlexIOShifters = 8
+
+	numFlexIOAPITimers   = 4
+	numFlexIOAPIShifters = 4
+)
 
 type FlexIOID uint32
 
@@ -35,20 +61,23 @@ const (
 	FIO3
 )
 
-const (
-	NumFlexIO = 3 // number of FlexIO peripherals of iMXRT1062
-
-	NumFlexPins = 14 // Teensy 4.1 = 22, MicroMod = 15
-
-	NumFlexTimers   = 8
-	NumFlexShifters = 8
-)
+func (id FlexIOID) FlexIO() *FlexIO {
+	switch id {
+	case FIO1:
+		return &FlexIO1
+	case FIO2:
+		return &FlexIO2
+	case FIO3:
+		return &FlexIO3
+	}
+	return nil
+}
 
 var (
 	FlexIO1 = FlexIO{
 		FLEXIO_Type: FLEXIO1,
-		flexIOID:    FIO1,
-		dmaChannel: [NumFlexShifters]uint8{
+		id:          FIO1,
+		dmaChannel: [NumFlexIOShifters]uint8{
 			dmaSourceFlexIO1Req0, dmaSourceFlexIO1Req1,
 			dmaSourceFlexIO1Req2, dmaSourceFlexIO1Req3,
 			dmaSourceNONE, dmaSourceNONE, dmaSourceNONE, dmaSourceNONE,
@@ -56,8 +85,8 @@ var (
 	}
 	FlexIO2 = FlexIO{
 		FLEXIO_Type: FLEXIO2,
-		flexIOID:    FIO2,
-		dmaChannel: [NumFlexShifters]uint8{
+		id:          FIO2,
+		dmaChannel: [NumFlexIOShifters]uint8{
 			dmaSourceFlexIO2Req0, dmaSourceFlexIO2Req1,
 			dmaSourceFlexIO2Req2, dmaSourceFlexIO2Req3,
 			dmaSourceNONE, dmaSourceNONE, dmaSourceNONE, dmaSourceNONE,
@@ -65,19 +94,21 @@ var (
 	}
 	FlexIO3 = FlexIO{
 		FLEXIO_Type: FLEXIO3,
-		flexIOID:    FIO3,
-		dmaChannel: [NumFlexShifters]uint8{
+		id:          FIO3,
+		dmaChannel: [NumFlexIOShifters]uint8{
 			dmaSourceNONE, dmaSourceNONE, dmaSourceNONE, dmaSourceNONE,
 			dmaSourceNONE, dmaSourceNONE, dmaSourceNONE, dmaSourceNONE,
 		},
 	}
 )
 
-var (
-	ErrFlexIOLimitCallbacks = errors.New("insufficient FLEXIO callbacks available")
-	ErrFlexIOLimitTimers    = errors.New("insufficient FLEXIO timers available")
-	ErrFlexIOLimitShifters  = errors.New("insufficient FLEXIO shifters available")
-)
+func (f *FlexIO) ID() FlexIOID { return f.id }
+
+type FlexIOPin struct {
+	Bus *FlexIO
+	Pin uint8
+	Mux uint8
+}
 
 const (
 	dmaSourceNONE = 0xFF
@@ -126,12 +157,12 @@ func (f *FlexIO) addHandler(h func() bool) error {
 }
 
 func (f *FlexIO) requestTimers(n int) (uint32, error) {
-	if n > 0 && n+bits.OnesCount32(f.usedTimers) > NumFlexTimers {
+	if n > 0 && n+bits.OnesCount32(f.usedTimers) > NumFlexIOTimers {
 		return 0, ErrFlexIOLimitTimers
 	}
 	var timers uint32
 	for n > 0 {
-		for i := uint32(0); i < NumFlexTimers; i++ {
+		for i := uint32(0); i < NumFlexIOTimers; i++ {
 			m := uint32(1) << i
 			if (f.usedTimers & m) == 0 {
 				timers |= m
@@ -145,11 +176,11 @@ func (f *FlexIO) requestTimers(n int) (uint32, error) {
 }
 
 func (f *FlexIO) requestShifter(excludeChannel ...uint8) (uint32, error) {
-	if bits.OnesCount32(f.usedShifters) >= NumFlexShifters {
+	if bits.OnesCount32(f.usedShifters) >= NumFlexIOShifters {
 		return 0, ErrFlexIOLimitShifters
 	}
 	var shifter uint32
-	for i := uint32(0); i < NumFlexShifters; i++ {
+	for i := uint32(0); i < NumFlexIOShifters; i++ {
 		m := uint32(1) << i
 		if (f.usedShifters & m) == 0 {
 			exclude := false
@@ -207,9 +238,44 @@ type FlexIOConfig interface {
 	Uint32() uint32
 }
 
-func (f *FlexIO) Configure(reg *volatile.Register32, config FlexIOConfig) error {
+func (f *FlexIO) SetConfig(reg *volatile.Register32, config FlexIOConfig) error {
+	if reg == nil {
+		return ErrFlexIOInvalidRegister
+	}
 	reg.Set(config.Uint32())
 	return nil
+}
+
+func (f *FlexIO) SetTimerConfig(timer int, config FlexIOConfig) error {
+	if timer < 0 || timer >= NumFlexIOTimers {
+		return ErrFlexIOTimerIndex
+	}
+	if timer < numFlexIOAPITimers {
+		return f.SetConfig(&f.TIMCFG[timer], config)
+	}
+	// There are more timers (8) than defined in both the reference manual (4)
+	// and the SVD API (4). So the "devie/nxp" package TIMCFG arrays have only 4
+	// registers. We have to manually get a pointer to any memory-mapped registers
+	// at indices 4 - 7 using the "unsafe" package.
+	off := 4 * uintptr(timer)
+	ptr := unsafe.Pointer(uintptr(unsafe.Pointer(&f.TIMCFG[0])) + off)
+	return f.SetConfig((*volatile.Register32)(ptr), config)
+}
+
+func (f *FlexIO) SetShifterConfig(shifter int, config FlexIOConfig) error {
+	if shifter < 0 || shifter >= NumFlexIOShifters {
+		return ErrFlexIOShifterIndex
+	}
+	if shifter < numFlexIOAPIShifters {
+		return f.SetConfig(&f.SHIFTCFG[shifter], config)
+	}
+	// There are more shifters (8) than defined in both the reference manual (4)
+	// and the SVD API (4). So the "devie/nxp" package SHIFTCFG arrays have only 4
+	// registers. We have to manually get a pointer to any memory-mapped registers
+	// at indices 4 - 7 using the "unsafe" package.
+	off := 4 * uintptr(shifter)
+	ptr := unsafe.Pointer(uintptr(unsafe.Pointer(&f.SHIFTCFG[0])) + off)
+	return f.SetConfig((*volatile.Register32)(ptr), config)
 }
 
 type FlexIOShifterControl struct {
@@ -254,7 +320,42 @@ type FlexIOControl interface {
 	Uint32() uint32
 }
 
-func (f *FlexIO) Control(reg *volatile.Register32, control FlexIOControl) error {
+func (f *FlexIO) SetControl(reg *volatile.Register32, control FlexIOControl) error {
+	if reg == nil {
+		return ErrFlexIOInvalidRegister
+	}
 	reg.Set(control.Uint32())
 	return nil
+}
+
+func (f *FlexIO) SetTimerControl(timer int, control FlexIOControl) error {
+	if timer < 0 || timer >= NumFlexIOTimers {
+		return ErrFlexIOTimerIndex
+	}
+	if timer < numFlexIOAPITimers {
+		return f.SetControl(&f.TIMCTL[timer], control)
+	}
+	// There are more timers (8) than defined in both the reference manual (4)
+	// and the SVD API (4). So the "devie/nxp" package TIMCTL arrays have only 4
+	// registers. We have to manually get a pointer to any memory-mapped registers
+	// at indices 4 - 7 using the "unsafe" package.
+	off := 4 * uintptr(timer)
+	ptr := unsafe.Pointer(uintptr(unsafe.Pointer(&f.TIMCTL[0])) + off)
+	return f.SetControl((*volatile.Register32)(ptr), control)
+}
+
+func (f *FlexIO) SetShifterControl(shifter int, control FlexIOControl) error {
+	if shifter < 0 || shifter >= NumFlexIOShifters {
+		return ErrFlexIOShifterIndex
+	}
+	if shifter < numFlexIOAPIShifters {
+		return f.SetControl(&f.SHIFTCTL[shifter], control)
+	}
+	// There are more shifters (8) than defined in both the reference manual (4)
+	// and the SVD API (4). So the "devie/nxp" package SHIFTCFG arrays have only 4
+	// registers. We have to manually get a pointer to any memory-mapped registers
+	// at indices 4 - 7 using the "unsafe" package.
+	off := 4 * uintptr(shifter)
+	ptr := unsafe.Pointer(uintptr(unsafe.Pointer(&f.SHIFTCTL[0])) + off)
+	return f.SetControl((*volatile.Register32)(ptr), control)
 }

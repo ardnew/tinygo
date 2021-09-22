@@ -1,4 +1,4 @@
-// +build mimxrt1062
+//go:build mimxrt1062
 
 package machine
 
@@ -41,8 +41,10 @@ const (
 	PinModeI2CSDA
 	PinModeI2CSCL
 
-	// FlexIO/PWM
+	// FlexIO
 	PinModeFlexIO
+
+	// FlexPWM
 	PinModeFlexPWM
 )
 
@@ -341,6 +343,9 @@ func (p Pin) Configure(config PinConfig) {
 		pad.Set(sre | dse(4) | spd(1) | ode | pke | pue | pup(3))
 
 	case PinModeFlexIO:
+		pad.Set(sre | dse(7) | spd(3))
+
+	case PinModeFlexPWM:
 		pad.Set(sre | dse(7) | spd(3))
 	}
 
@@ -916,28 +921,28 @@ func (p Pin) getMuxMode(config PinConfig) uint32 {
 
 	case PinModeFlexIO:
 		var mode uint32
-		switch p {
-		case PD4, PD5, PD6, PD7, PD8:
-			// FLEXIO1 always alternate function 4
-			mode = uint32(4)
-		case PB0, PB1, PB2, PB3, PB4, PB5, PB6, PB7,
-			PB8, PB9, PB10, PB11, PB12, PB13, PB14, PB15,
-			// BUG:
-			// The following are connected to both FLEXIO2 and FLEXIO3. There is
-			// currently no way to route them to FLEXIO3 as we only define a single
-			// PinMode (PinModeFlexIO). I'm defaulting the mux configuration to use
-			// FLEXIO2 because its the only one that is DMA-capable, and its the only
-			// one I currently have a use case for (SmartMatrix SmartLED shield).
-			PB16, PB17, PB18, PB19, PB20, PB21, PB22, PB23,
-			PB24, PB25, PB26, PB27, PB28, PB29, PB30, PB31:
-			// FLEXIO2 always alternate function 4
-			mode = uint32(4)
-		case PA16, PA17, PA18, PA19, PA20, PA21, PA22, PA23,
-			PA24, PA25, PA26, PA27, PA28, PA29, PA30, PA31:
-			// FLEXIO3 always alternate function 9
-			mode = uint32(9)
-		default:
-			panic("machine: invalid FLEXIO pin")
+		var found bool
+		for i := 1; i <= nxp.NumFlexIO; i++ {
+			if m, ok := p.FlexIO(i); ok {
+				mode = uint32(m.Mux)
+				found = true
+				break
+			}
+		}
+		if !found {
+			panc("machine: invalid FLEXIO pin")
+		}
+		if forcePath {
+			mode |= 0x10 // SION bit
+		}
+		return mode
+
+	case PinModeFlexPWM:
+		var mode uint32
+		if m, ok := p.FlexPWM(); ok {
+			mode = uint32(m.Mux)
+		} else {
+			panic("machine: invalid PWM pin")
 		}
 		if forcePath {
 			mode |= 0x10 // SION bit
@@ -949,177 +954,318 @@ func (p Pin) getMuxMode(config PinConfig) uint32 {
 	}
 }
 
-func (p Pin) FlexIO(instance *nxp.FlexIO) uint8 {
+func (p Pin) FlexIO(instance int) (nxp.FlexIOPin, bool) {
 	switch instance {
-	case &nxp.FlexIO1:
+	case 1:
 		switch p {
 		case PD0:
-			return 0
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO1, Pin: 0, Mux: 4}, true
 		case PD1:
-			return 1
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO1, Pin: 1, Mux: 4}, true
 		case PD2:
-			return 2
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO1, Pin: 2, Mux: 4}, true
 		case PD3:
-			return 3
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO1, Pin: 3, Mux: 4}, true
 		case PD4:
-			return 4
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO1, Pin: 4, Mux: 4}, true // OEN
 		case PD5:
-			return 5
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO1, Pin: 5, Mux: 4}, true // LAT
 		case PD6:
-			return 6
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO1, Pin: 6, Mux: 4}, true
 		case PD7:
-			return 7
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO1, Pin: 7, Mux: 4}, true
 		case PD8:
-			return 8
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO1, Pin: 8, Mux: 4}, true
 		case PD9:
-			return 9
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO1, Pin: 9, Mux: 4}, true
 		case PD10:
-			return 10
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO1, Pin: 10, Mux: 4}, true
 		case PD11:
-			return 11
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO1, Pin: 11, Mux: 4}, true
 		case PD26:
-			return 12
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO1, Pin: 12, Mux: 4}, true
 		case PD27:
-			return 13
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO1, Pin: 13, Mux: 4}, true
 		case PD28:
-			return 14
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO1, Pin: 14, Mux: 4}, true
 		case PD29:
-			return 15
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO1, Pin: 15, Mux: 4}, true
 		}
-	case &nxp.FlexIO2:
+	case 2:
 		switch p {
 		case PB0:
-			return 0
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO2, Pin: 0, Mux: 4}, true // B0, A2
 		case PB1:
-			return 1
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO2, Pin: 1, Mux: 4}, true // R1, A3
 		case PB2:
-			return 2
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO2, Pin: 2, Mux: 4}, true // G1, A4
 		case PB3:
-			return 3
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO2, Pin: 3, Mux: 4}, true // B1
 		case PB4:
-			return 4
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO2, Pin: 4, Mux: 4}, true
 		case PB5:
-			return 5
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO2, Pin: 5, Mux: 4}, true
 		case PB6:
-			return 6
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO2, Pin: 6, Mux: 4}, true
 		case PB7:
-			return 7
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO2, Pin: 7, Mux: 4}, true
 		case PB8:
-			return 8
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO2, Pin: 8, Mux: 4}, true
 		case PB9:
-			return 9
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO2, Pin: 9, Mux: 4}, true
 		case PB10:
-			return 10
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO2, Pin: 10, Mux: 4}, true // R0, A0
 		case PB11:
-			return 11
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO2, Pin: 11, Mux: 4}, true // G0, A1
 		case PB12:
-			return 12
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO2, Pin: 12, Mux: 4}, true
 		case PB13:
-			return 13
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO2, Pin: 13, Mux: 4}, true
 		case PB14:
-			return 14
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO2, Pin: 14, Mux: 4}, true
 		case PB15:
-			return 15
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO2, Pin: 15, Mux: 4}, true
 		case PB16:
-			return 16
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO2, Pin: 16, Mux: 4}, true
 		case PB17:
-			return 17
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO2, Pin: 17, Mux: 4}, true // CLK
 		case PB18:
-			return 18
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO2, Pin: 18, Mux: 4}, true
 		case PB19:
-			return 19
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO2, Pin: 19, Mux: 4}, true
 		case PB20:
-			return 20
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO2, Pin: 20, Mux: 4}, true
 		case PB21:
-			return 21
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO2, Pin: 21, Mux: 4}, true
 		case PB22:
-			return 22
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO2, Pin: 22, Mux: 4}, true
 		case PB23:
-			return 23
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO2, Pin: 23, Mux: 4}, true
 		case PB24:
-			return 24
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO2, Pin: 24, Mux: 4}, true
 		case PB25:
-			return 25
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO2, Pin: 25, Mux: 4}, true
 		case PB26:
-			return 26
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO2, Pin: 26, Mux: 4}, true
 		case PB27:
-			return 27
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO2, Pin: 27, Mux: 4}, true
 		case PB28:
-			return 28
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO2, Pin: 28, Mux: 4}, true
 		case PB29:
-			return 29
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO2, Pin: 29, Mux: 4}, true
 		case PB30:
-			return 30
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO2, Pin: 30, Mux: 4}, true
 		case PB31:
-			return 31
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO2, Pin: 31, Mux: 4}, true
 		}
-	case &nxp.FlexIO3:
+	case 3:
 		switch p {
 		case PA16:
-			return 0
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO3, Pin: 0, Mux: 9}, true
 		case PA17:
-			return 1
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO3, Pin: 1, Mux: 9}, true
 		case PA18:
-			return 2
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO3, Pin: 2, Mux: 9}, true
 		case PA19:
-			return 3
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO3, Pin: 3, Mux: 9}, true
 		case PA20:
-			return 4
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO3, Pin: 4, Mux: 9}, true
 		case PA21:
-			return 5
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO3, Pin: 5, Mux: 9}, true
 		case PA22:
-			return 6
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO3, Pin: 6, Mux: 9}, true
 		case PA23:
-			return 7
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO3, Pin: 7, Mux: 9}, true
 		case PA24:
-			return 8
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO3, Pin: 8, Mux: 9}, true
 		case PA25:
-			return 9
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO3, Pin: 9, Mux: 9}, true
 		case PA26:
-			return 10
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO3, Pin: 10, Mux: 9}, true
 		case PA27:
-			return 11
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO3, Pin: 11, Mux: 9}, true
 		case PA28:
-			return 12
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO3, Pin: 12, Mux: 9}, true
 		case PA29:
-			return 13
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO3, Pin: 13, Mux: 9}, true
 		case PA30:
-			return 14
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO3, Pin: 14, Mux: 9}, true
 		case PA31:
-			return 15
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO3, Pin: 15, Mux: 9}, true
 		case PB16:
-			return 16
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO3, Pin: 16, Mux: 9}, true
 		case PB17:
-			return 17
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO3, Pin: 17, Mux: 9}, true
 		case PB18:
-			return 18
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO3, Pin: 18, Mux: 9}, true
 		case PB19:
-			return 19
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO3, Pin: 19, Mux: 9}, true
 		case PB20:
-			return 20
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO3, Pin: 20, Mux: 9}, true
 		case PB21:
-			return 21
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO3, Pin: 21, Mux: 9}, true
 		case PB22:
-			return 22
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO3, Pin: 22, Mux: 9}, true
 		case PB23:
-			return 23
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO3, Pin: 23, Mux: 9}, true
 		case PB24:
-			return 24
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO3, Pin: 24, Mux: 9}, true
 		case PB25:
-			return 25
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO3, Pin: 25, Mux: 9}, true
 		case PB26:
-			return 26
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO3, Pin: 26, Mux: 9}, true
 		case PB27:
-			return 27
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO3, Pin: 27, Mux: 9}, true
 		case PB28:
-			return 28
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO3, Pin: 28, Mux: 9}, true
 		case PB29:
-			return 29
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO3, Pin: 29, Mux: 9}, true
 		case PB30:
-			return 30
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO3, Pin: 30, Mux: 9}, true
 		case PB31:
-			return 31
+			return nxp.FlexIOPin{Bus: &nxp.FlexIO3, Pin: 31, Mux: 9}, true
 		}
 	}
-	return uint8(NoPin)
+	return nxp.FlexIOPin{}, false
+}
+
+func (p Pin) FlexPWM() (nxp.FlexPWMPin, bool) {
+	switch p {
+	case PA0: // [AD_B0_00]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM2, Sub: 3, Chan: nxp.FPWMA, Mux: 0}, true
+	case PA1: // [AD_B0_01]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM2, Sub: 3, Chan: nxp.FPWMB, Mux: 0}, true
+	case PA2: // [AD_B0_02]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM1, Sub: 0, Chan: nxp.FPWMX, Mux: 4}, true
+	case PA3: // [AD_B0_03]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM1, Sub: 1, Chan: nxp.FPWMX, Mux: 4}, true
+	case PA9: // [AD_B0_09]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM2, Sub: 3, Chan: nxp.FPWMA, Mux: 1}, true
+	case PA10: // [AD_B0_10]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM1, Sub: 3, Chan: nxp.FPWMA, Mux: 1}, true
+	case PA11: // [AD_B0_11]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM1, Sub: 3, Chan: nxp.FPWMB, Mux: 1}, true
+	case PA12: // [AD_B0_12]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM1, Sub: 2, Chan: nxp.FPWMX, Mux: 4}, true
+	case PA13: // [AD_B0_13]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM1, Sub: 3, Chan: nxp.FPWMX, Mux: 4}, true
+	case PA24: // [AD_B1_08]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM4, Sub: 0, Chan: nxp.FPWMA, Mux: 1}, true
+	case PA25: // [AD_B1_09]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM4, Sub: 1, Chan: nxp.FPWMA, Mux: 1}, true
+	case PB6: // [B0_06]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM2, Sub: 0, Chan: nxp.FPWMA, Mux: 2}, true
+	case PB7: // [B0_07]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM2, Sub: 0, Chan: nxp.FPWMB, Mux: 2}, true
+	case PB8: // [B0_08]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM2, Sub: 1, Chan: nxp.FPWMA, Mux: 2}, true
+	case PB9: // [B0_09]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM2, Sub: 1, Chan: nxp.FPWMB, Mux: 2}, true
+	case PB10: // [B0_10]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM2, Sub: 2, Chan: nxp.FPWMA, Mux: 2}, true
+	case PB11: // [B0_11]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM2, Sub: 2, Chan: nxp.FPWMB, Mux: 2}, true
+	case PB16: // [B1_00]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM1, Sub: 3, Chan: nxp.FPWMA, Mux: 6}, true
+	case PB17: // [B1_01]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM1, Sub: 3, Chan: nxp.FPWMB, Mux: 6}, true
+	case PB18: // [B1_02]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM2, Sub: 3, Chan: nxp.FPWMA, Mux: 6}, true
+	case PB19: // [B1_03]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM2, Sub: 3, Chan: nxp.FPWMB, Mux: 6}, true
+	case PB30: // [B1_14]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM4, Sub: 2, Chan: nxp.FPWMA, Mux: 1}, true
+	case PB31: // [B1_15]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM4, Sub: 3, Chan: nxp.FPWMA, Mux: 1}, true
+	case PC0: // [SD_B1_00]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM1, Sub: 3, Chan: nxp.FPWMA, Mux: 2}, true
+	case PC1: // [SD_B1_01]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM1, Sub: 3, Chan: nxp.FPWMB, Mux: 2}, true
+	case PC2: // [SD_B1_02]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM2, Sub: 3, Chan: nxp.FPWMA, Mux: 2}, true
+	case PC3: // [SD_B1_03]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM2, Sub: 3, Chan: nxp.FPWMB, Mux: 2}, true
+	case PC12: // [SD_B0_00]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM1, Sub: 0, Chan: nxp.FPWMA, Mux: 1}, true
+	case PC13: // [SD_B0_01]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM1, Sub: 0, Chan: nxp.FPWMB, Mux: 1}, true
+	case PC14: // [SD_B0_02]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM1, Sub: 1, Chan: nxp.FPWMA, Mux: 1}, true
+	case PC15: // [SD_B0_03]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM1, Sub: 1, Chan: nxp.FPWMB, Mux: 1}, true
+	case PC16: // [SD_B0_04]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM1, Sub: 2, Chan: nxp.FPWMA, Mux: 1}, true
+	case PC17: // [SD_B0_05]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM1, Sub: 2, Chan: nxp.FPWMB, Mux: 1}, true
+	case PC18: // [EMC_32]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM3, Sub: 1, Chan: nxp.FPWMB, Mux: 1}, true
+	case PC19: // [EMC_33]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM3, Sub: 2, Chan: nxp.FPWMA, Mux: 1}, true
+	case PC20: // [EMC_34]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM3, Sub: 2, Chan: nxp.FPWMB, Mux: 1}, true
+	case PC24: // [EMC_38]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM1, Sub: 3, Chan: nxp.FPWMA, Mux: 1}, true
+	case PC25: // [EMC_39]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM1, Sub: 3, Chan: nxp.FPWMB, Mux: 1}, true
+	case PD0: // [EMC_00]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM4, Sub: 0, Chan: nxp.FPWMA, Mux: 1}, true
+	case PD1: // [EMC_01]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM4, Sub: 0, Chan: nxp.FPWMB, Mux: 1}, true
+	case PD2: // [EMC_02]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM4, Sub: 1, Chan: nxp.FPWMA, Mux: 1}, true
+	case PD3: // [EMC_03]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM4, Sub: 1, Chan: nxp.FPWMB, Mux: 1}, true
+	case PD4: // [EMC_04]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM4, Sub: 2, Chan: nxp.FPWMA, Mux: 1}, true
+	case PD5: // [EMC_05]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM4, Sub: 2, Chan: nxp.FPWMB, Mux: 1}, true
+	case PD6: // [EMC_06]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM2, Sub: 0, Chan: nxp.FPWMA, Mux: 1}, true
+	case PD7: // [EMC_07]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM2, Sub: 0, Chan: nxp.FPWMB, Mux: 1}, true
+	case PD8: // [EMC_08]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM2, Sub: 1, Chan: nxp.FPWMA, Mux: 1}, true
+	case PD9: // [EMC_09]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM2, Sub: 1, Chan: nxp.FPWMB, Mux: 1}, true
+	case PD10: // [EMC_10]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM2, Sub: 2, Chan: nxp.FPWMA, Mux: 1}, true
+	case PD11: // [EMC_11]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM2, Sub: 2, Chan: nxp.FPWMB, Mux: 1}, true
+	case PD12: // [EMC_12]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM1, Sub: 3, Chan: nxp.FPWMA, Mux: 4}, true
+	case PD13: // [EMC_13]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM1, Sub: 3, Chan: nxp.FPWMB, Mux: 4}, true
+	case PD17: // [EMC_17]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM4, Sub: 3, Chan: nxp.FPWMA, Mux: 1}, true
+	case PD18: // [EMC_18]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM4, Sub: 3, Chan: nxp.FPWMB, Mux: 1}, true
+	case PD19: // [EMC_19]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM2, Sub: 3, Chan: nxp.FPWMA, Mux: 1}, true
+	case PD20: // [EMC_20]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM2, Sub: 3, Chan: nxp.FPWMB, Mux: 1}, true
+	case PD21: // [EMC_21]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM3, Sub: 3, Chan: nxp.FPWMA, Mux: 1}, true
+	case PD22: // [EMC_22]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM3, Sub: 3, Chan: nxp.FPWMB, Mux: 1}, true
+	case PD23: // [EMC_23]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM1, Sub: 0, Chan: nxp.FPWMA, Mux: 1}, true
+	case PD24: // [EMC_24]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM1, Sub: 0, Chan: nxp.FPWMB, Mux: 1}, true
+	case PD25: // [EMC_25]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM1, Sub: 1, Chan: nxp.FPWMA, Mux: 1}, true
+	case PD26: // [EMC_26]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM1, Sub: 1, Chan: nxp.FPWMB, Mux: 1}, true
+	case PD27: // [EMC_27]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM1, Sub: 2, Chan: nxp.FPWMA, Mux: 1}, true
+	case PD28: // [EMC_28]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM1, Sub: 2, Chan: nxp.FPWMB, Mux: 1}, true
+	case PD29: // [EMC_29]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM3, Sub: 0, Chan: nxp.FPWMA, Mux: 1}, true
+	case PD30: // [EMC_30]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM3, Sub: 0, Chan: nxp.FPWMB, Mux: 1}, true
+	case PD31: // [EMC_31]:
+		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM3, Sub: 1, Chan: nxp.FPWMA, Mux: 1}, true
+	}
+
+	return nxp.FlexPWMPin{}, false
 }

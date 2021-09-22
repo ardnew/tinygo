@@ -1,4 +1,4 @@
-// +build mimxrt1062
+//go:build mimxrt1062
 
 package runtime
 
@@ -8,7 +8,8 @@ import (
 
 // Core clock frequencies (Hz)
 const (
-	CORE_FREQ = 600000000 // 600 MHz
+	CORE_FREQ = 600000000 // 600 MHz (AHB)
+	BUS_FREQ  = 150000000 // 150 MHz (IPG)
 	OSC_FREQ  = 24000000  //  24 MHz
 )
 
@@ -112,6 +113,16 @@ func initClocks() {
 
 	nxp.DivIpPerclk.Div(0) // divide PERCLK_PODF (DIV1)
 
+	nxp.ClockIpTimer1.Enable(false) // disable QuadTimer
+	nxp.ClockIpTimer2.Enable(false) //
+	nxp.ClockIpTimer3.Enable(false) //
+	nxp.ClockIpTimer4.Enable(false) //
+
+	nxp.ClockIpPwm1.Enable(false) // disable PWM
+	nxp.ClockIpPwm2.Enable(false) //
+	nxp.ClockIpPwm3.Enable(false) //
+	nxp.ClockIpPwm4.Enable(false) //
+
 	nxp.ClockIpUsdhc1.Enable(false) // disable USDHC1
 	nxp.DivIpUsdhc1.Div(1)          // divide USDHC1_PODF (DIV2)
 	nxp.MuxIpUsdhc1.Mux(1)          // USDHC1 select PLL2_PFD0
@@ -201,14 +212,11 @@ func initClocks() {
 	nxp.ClockIpFlexio1.Enable(false) // disable FLEXIO1
 	nxp.DivIpFlexio1Pre.Div(1)       // divide FLEXIO1_CLK_PRED (DIV2)
 	nxp.DivIpFlexio1.Div(7)          // divide FLEXIO1_CLK_PODF (DIV8)
-	nxp.MuxIpFlexio1.Mux(3)          // FLEXIO1 select PLL3_SW
-	                                 //  ** FLEXIO1 configured for 30 MHz **
+	nxp.MuxIpFlexio1.Mux(3)          // FLEXIO1 select PLL3_SW (will be 30 MHz)
 	nxp.ClockIpFlexio2.Enable(false) // disable FLEXIO2
-	nxp.DivIpFlexio2Pre.Div(1)       // divide FLEXIO2_CLK_PRED (DIV2)
-	nxp.DivIpFlexio2.Div(1)          // divide FLEXIO2_CLK_PODF (DIV2)
-	nxp.MuxIpFlexio2.Mux(3)          // FLEXIO2 select PLL3_SW (will be 120 MHz)
-                                   //  ** FLEXIO2(3) configured for 120 MHz **
-																	 //    (FLEXIO3 shares clock with FLEXIO2)
+	nxp.DivIpFlexio2Pre.Div(0)       // divide FLEXIO2_CLK_PRED (DIV1)
+	nxp.DivIpFlexio2.Div(0)          // divide FLEXIO2_CLK_PODF (DIV1)
+	nxp.MuxIpFlexio2.Mux(3)          // FLEXIO2 select PLL3_SW (will be 480 MHz)
 
 	nxp.MuxIpPll3Sw.Mux(0) // PLL3_SW select PLL3_MAIN
 
@@ -274,12 +282,22 @@ func enableTimerClocks() {
 	nxp.ClockIpGpt2.Enable(true)  //
 	nxp.ClockIpGpt2S.Enable(true) //
 	nxp.ClockIpPit.Enable(true)   //
+
+	nxp.ClockIpTimer1.Enable(true) // enable QuadTimer
+	nxp.ClockIpTimer2.Enable(true) //
+	nxp.ClockIpTimer3.Enable(true) //
+	nxp.ClockIpTimer4.Enable(true) //
 }
 
 func enablePinClocks() {
 
 	nxp.ClockIpIomuxcGpr.Enable(true) // enable IOMUXC
 	nxp.ClockIpIomuxc.Enable(true)    //
+
+	nxp.ClockIpPwm1.Enable(true) // enable PWM
+	nxp.ClockIpPwm2.Enable(true) //
+	nxp.ClockIpPwm3.Enable(true) //
+	nxp.ClockIpPwm4.Enable(true) //
 
 	nxp.ClockIpGpio1.Enable(true) // enable GPIO
 	nxp.ClockIpGpio2.Enable(true) //
