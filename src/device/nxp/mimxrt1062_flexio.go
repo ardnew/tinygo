@@ -26,6 +26,12 @@ var (
 	ErrFlexIOInvalidControl  = errors.New("invalid FlexIO control register")
 )
 
+func init() {
+	FlexIO1.interrupt = interrupt.New(IRQ_FLEXIO1, FlexIO1.handleInterrupt)
+	FlexIO2.interrupt = interrupt.New(IRQ_FLEXIO2, FlexIO2.handleInterrupt)
+	FlexIO3.interrupt = interrupt.New(IRQ_FLEXIO3, FlexIO3.handleInterrupt)
+}
+
 type FlexIO struct {
 	*FLEXIO_Type // structure containing all peripheral registers.
 
@@ -110,33 +116,21 @@ type FlexIOPin struct {
 	Mux uint8
 }
 
-const (
-	dmaSourceNONE = 0xFF
-
-	dmaSourceFlexIO1Req0 = 0 | 0x00 // FlexIO1 Request0
-	dmaSourceFlexIO1Req1 = 0 | 0x00 // FlexIO1 Request1
-	dmaSourceFlexIO1Req2 = 0 | 0x40 // FlexIO1 Request2
-	dmaSourceFlexIO1Req3 = 0 | 0x40 // FlexIO1 Request3
-
-	dmaSourceFlexIO2Req0 = 1 | 0x00 // FlexIO2 Request0
-	dmaSourceFlexIO2Req1 = 1 | 0x00 // FlexIO2 Request1
-	dmaSourceFlexIO2Req2 = 1 | 0x40 // FlexIO2 Request2
-	dmaSourceFlexIO2Req3 = 1 | 0x40 // FlexIO2 Request3
-)
-
-func init() {
-	FlexIO1.interrupt = interrupt.New(IRQ_FLEXIO1, FlexIO1.handleInterrupt)
-	FlexIO2.interrupt = interrupt.New(IRQ_FLEXIO2, FlexIO2.handleInterrupt)
-	FlexIO3.interrupt = interrupt.New(IRQ_FLEXIO3, FlexIO3.handleInterrupt)
-}
-
 func (f *FlexIO) handleInterrupt(interrupt.Interrupt) {
 	for _, h := range f.callback {
 		if h != nil && h() {
-			return
+			break
 		}
 	}
-	// no callbacks installed
+	// The dsb instruction is copied from NXP MCUXpresso SDK (iMXRT1062), which
+	// cites the following ARM errata as motivation:
+	//
+	//   | ARM errata 838869, affects Cortex-M4(F) Store immediate overlapping
+	//   | exception return operation might vector to incorrect interrupt.
+	//   | For Cortex-M7, if core speed much faster than peripheral register write
+	//   | speed, the peripheral interrupt flags may be still set after exiting
+	//   | ISR, this results to the same error similar with errata 83869.
+	//
 	arm.AsmFull(`
 		dsb 0xF
 	`, nil)

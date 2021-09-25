@@ -123,6 +123,8 @@ func initClocks() {
 	nxp.ClockIpPwm3.Enable(false) //
 	nxp.ClockIpPwm4.Enable(false) //
 
+	nxp.ClockIpDma.Enable(false) // disable DMA
+
 	nxp.ClockIpUsdhc1.Enable(false) // disable USDHC1
 	nxp.DivIpUsdhc1.Div(1)          // divide USDHC1_PODF (DIV2)
 	nxp.MuxIpUsdhc1.Mux(1)          // USDHC1 select PLL2_PFD0
@@ -313,6 +315,8 @@ func enablePeripheralClocks() {
 	nxp.ClockIpXbar1.Enable(true) // enable XBAR
 	nxp.ClockIpXbar2.Enable(true) //
 	nxp.ClockIpXbar3.Enable(true) //
+
+	nxp.ClockIpDma.Enable(true) // enable DMA
 
 	nxp.ClockIpUsdhc1.Enable(true) // enable USDHC
 	nxp.ClockIpUsdhc2.Enable(true) //

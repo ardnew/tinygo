@@ -7,7 +7,6 @@
 package nxp
 
 import (
-	"runtime/interrupt"
 	"runtime/volatile"
 	"unsafe"
 )
@@ -16,9 +15,6 @@ type FlexPWM struct {
 	*FLEXPWM_Type // structure containing all peripheral registers.
 
 	id FlexPWMID
-
-	interruptEnabled bool
-	interrupt        interrupt.Interrupt
 }
 
 const (
@@ -84,6 +80,56 @@ type FlexPWMPin struct {
 	Sub  uint8       // FlexPWM submodule number (0-3)
 	Chan FlexPWMChan // FlexPWM signal channel (FPWM[A], [B], or [X])
 	Mux  uint8       // IOMUXC pin alternate function number for FlexPWM (0-9)
+}
+
+func (p FlexPWMPin) DMAChannel() (read, write uint8) {
+	switch p.Bus.ID() {
+	case FPWM1:
+		switch p.Sub {
+		case 0:
+			return dmaSourceFlexPWM1Read0, dmaSourceFlexPWM1Write0
+		case 1:
+			return dmaSourceFlexPWM1Read1, dmaSourceFlexPWM1Write1
+		case 2:
+			return dmaSourceFlexPWM1Read2, dmaSourceFlexPWM1Write2
+		case 3:
+			return dmaSourceFlexPWM1Read3, dmaSourceFlexPWM1Write3
+		}
+	case FPWM2:
+		switch p.Sub {
+		case 0:
+			return dmaSourceFlexPWM2Read0, dmaSourceFlexPWM2Write0
+		case 1:
+			return dmaSourceFlexPWM2Read1, dmaSourceFlexPWM2Write1
+		case 2:
+			return dmaSourceFlexPWM2Read2, dmaSourceFlexPWM2Write2
+		case 3:
+			return dmaSourceFlexPWM2Read3, dmaSourceFlexPWM2Write3
+		}
+	case FPWM3:
+		switch p.Sub {
+		case 0:
+			return dmaSourceFlexPWM3Read0, dmaSourceFlexPWM3Write0
+		case 1:
+			return dmaSourceFlexPWM3Read1, dmaSourceFlexPWM3Write1
+		case 2:
+			return dmaSourceFlexPWM3Read2, dmaSourceFlexPWM3Write2
+		case 3:
+			return dmaSourceFlexPWM3Read3, dmaSourceFlexPWM3Write3
+		}
+	case FPWM4:
+		switch p.Sub {
+		case 0:
+			return dmaSourceFlexPWM4Read0, dmaSourceFlexPWM4Write0
+		case 1:
+			return dmaSourceFlexPWM4Read1, dmaSourceFlexPWM4Write1
+		case 2:
+			return dmaSourceFlexPWM4Read2, dmaSourceFlexPWM4Write2
+		case 3:
+			return dmaSourceFlexPWM4Read3, dmaSourceFlexPWM4Write3
+		}
+	}
+	return
 }
 
 type FLEXPWM_Type struct {

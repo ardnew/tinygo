@@ -930,7 +930,7 @@ func (p Pin) getMuxMode(config PinConfig) uint32 {
 			}
 		}
 		if !found {
-			panc("machine: invalid FLEXIO pin")
+			panic("machine: invalid FLEXIO pin")
 		}
 		if forcePath {
 			mode |= 0x10 // SION bit
