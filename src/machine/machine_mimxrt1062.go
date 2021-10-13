@@ -1215,9 +1215,9 @@ func (p Pin) FlexPWM() (nxp.FlexPWMPin, bool) {
 		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM4, Sub: 1, Chan: nxp.FPWMA, Mux: 1}, true
 	case PD3: // [EMC_03]:
 		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM4, Sub: 1, Chan: nxp.FPWMB, Mux: 1}, true
-	case PD4: // [EMC_04]:
+	case PD4: // [EMC_04]: OEN
 		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM4, Sub: 2, Chan: nxp.FPWMA, Mux: 1}, true
-	case PD5: // [EMC_05]:
+	case PD5: // [EMC_05]: LAT
 		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM4, Sub: 2, Chan: nxp.FPWMB, Mux: 1}, true
 	case PD6: // [EMC_06]:
 		return nxp.FlexPWMPin{Bus: &nxp.FlexPWM2, Sub: 0, Chan: nxp.FPWMA, Mux: 1}, true

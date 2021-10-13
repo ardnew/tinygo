@@ -82,7 +82,7 @@ type FlexPWMPin struct {
 	Mux  uint8       // IOMUXC pin alternate function number for FlexPWM (0-9)
 }
 
-func (p FlexPWMPin) DMAChannel() (read, write uint8) {
+func (p FlexPWMPin) DMAChannel() (read, write DMAChannelID) {
 	switch p.Bus.ID() {
 	case FPWM1:
 		switch p.Sub {
@@ -133,7 +133,7 @@ func (p FlexPWMPin) DMAChannel() (read, write uint8) {
 }
 
 type FLEXPWM_Type struct {
-	SM [4]struct { //  SM0    SM1    SM2    SM3
+	SM [4]struct { //                   SM0    SM1    SM2    SM3
 		CNT       volatile.Register16 //  0x00   0x60   0xC0   0x120
 		INIT      volatile.Register16 //  0x02   0x62   0xC2   0x122
 		CTRL2     volatile.Register16 //  0x04   0x64   0xC4   0x124

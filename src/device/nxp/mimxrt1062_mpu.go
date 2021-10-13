@@ -13,6 +13,16 @@ import (
 	"unsafe"
 )
 
+// InProgramMemory returns true if and only if the given address is less than the
+// starting address region of on-chip memory-mapped integrated peripherals.
+//
+// It does not verify the address actually belongs to one of the physical system
+// RAM/ROM regions, and a false result doesn't necessarily mean the address
+// belongs to any integrated peripheral. However, if true, the address is
+// guaranteed to not belong to an integrated peripheral, and, if false, it is
+// guaranteed the address does not belong to program memory (RAM/ROM).
+func InProgramMemory(address uintptr) bool { return address < 0x40000000 }
+
 type MPU_Type struct {
 	TYPE    volatile.Register32 // 0x000 (R/ ) - MPU Type Register
 	CTRL    volatile.Register32 // 0x004 (R/W) - MPU Control Register

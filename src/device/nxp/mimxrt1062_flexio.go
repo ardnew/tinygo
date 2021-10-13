@@ -41,7 +41,7 @@ type FlexIO struct {
 	interrupt        interrupt.Interrupt
 	callback         [NumFlexIOTimers]func() bool
 
-	dmaChannel [NumFlexIOShifters]uint8
+	dmaChannel [NumFlexIOShifters]DMAChannelID
 
 	usedTimers   uint32
 	usedShifters uint32
@@ -83,7 +83,7 @@ var (
 	FlexIO1 = FlexIO{
 		FLEXIO_Type: FLEXIO1,
 		id:          FIO1,
-		dmaChannel: [NumFlexIOShifters]uint8{
+		dmaChannel: [NumFlexIOShifters]DMAChannelID{
 			dmaSourceFlexIO1Req0, dmaSourceFlexIO1Req1,
 			dmaSourceFlexIO1Req2, dmaSourceFlexIO1Req3,
 			dmaSourceNONE, dmaSourceNONE, dmaSourceNONE, dmaSourceNONE,
@@ -92,7 +92,7 @@ var (
 	FlexIO2 = FlexIO{
 		FLEXIO_Type: FLEXIO2,
 		id:          FIO2,
-		dmaChannel: [NumFlexIOShifters]uint8{
+		dmaChannel: [NumFlexIOShifters]DMAChannelID{
 			dmaSourceFlexIO2Req0, dmaSourceFlexIO2Req1,
 			dmaSourceFlexIO2Req2, dmaSourceFlexIO2Req3,
 			dmaSourceNONE, dmaSourceNONE, dmaSourceNONE, dmaSourceNONE,
@@ -101,7 +101,7 @@ var (
 	FlexIO3 = FlexIO{
 		FLEXIO_Type: FLEXIO3,
 		id:          FIO3,
-		dmaChannel: [NumFlexIOShifters]uint8{
+		dmaChannel: [NumFlexIOShifters]DMAChannelID{
 			dmaSourceNONE, dmaSourceNONE, dmaSourceNONE, dmaSourceNONE,
 			dmaSourceNONE, dmaSourceNONE, dmaSourceNONE, dmaSourceNONE,
 		},
@@ -109,6 +109,13 @@ var (
 )
 
 func (f *FlexIO) ID() FlexIOID { return f.id }
+
+func (f *FlexIO) DMAChannel(shifter uint8) DMAChannelID {
+	if shifter < NumFlexIOShifters {
+		return f.dmaChannel[shifter]
+	}
+	return dmaSourceNONE
+}
 
 type FlexIOPin struct {
 	Bus *FlexIO
@@ -169,7 +176,7 @@ func (f *FlexIO) requestTimers(n int) (uint32, error) {
 	return timers, nil
 }
 
-func (f *FlexIO) requestShifter(excludeChannel ...uint8) (uint32, error) {
+func (f *FlexIO) requestShifter(excludeChannel ...DMAChannelID) (uint32, error) {
 	if bits.OnesCount32(f.usedShifters) >= NumFlexIOShifters {
 		return 0, ErrFlexIOLimitShifters
 	}

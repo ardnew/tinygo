@@ -118,11 +118,6 @@ func initClocks() {
 	nxp.ClockIpTimer3.Enable(false) //
 	nxp.ClockIpTimer4.Enable(false) //
 
-	nxp.ClockIpPwm1.Enable(false) // disable PWM
-	nxp.ClockIpPwm2.Enable(false) //
-	nxp.ClockIpPwm3.Enable(false) //
-	nxp.ClockIpPwm4.Enable(false) //
-
 	nxp.ClockIpDma.Enable(false) // disable DMA
 
 	nxp.ClockIpUsdhc1.Enable(false) // disable USDHC1
@@ -270,6 +265,11 @@ func initClocks() {
 	nxp.IOMUXC_GPR.GPR5.ClearBits(nxp.IOMUXC_GPR_GPR5_VREF_1M_CLK_GPT1_Msk)
 	// set GPT2 High frequency reference clock source
 	nxp.IOMUXC_GPR.GPR5.ClearBits(nxp.IOMUXC_GPR_GPR5_VREF_1M_CLK_GPT2_Msk)
+
+	nxp.ClockIpPwm1.Enable(false) // disable PWM
+	nxp.ClockIpPwm2.Enable(false) //
+	nxp.ClockIpPwm3.Enable(false) //
+	nxp.ClockIpPwm4.Enable(false) //
 
 	nxp.ClockIpGpio1.Enable(false) // disable GPIO
 	nxp.ClockIpGpio2.Enable(false) //
