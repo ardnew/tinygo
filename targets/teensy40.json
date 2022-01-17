@@ -1,7 +1,7 @@
 {
   "inherits": ["cortex-m7"],
   "build-tags": ["teensy40", "teensy", "mimxrt1062", "nxp"],
-  "serial": "uart",
+  "serial": "usb",
   "automatic-stack-size": false,
   "default-stack-size": 4096,
   "linkerscript": "targets/mimxrt1062-teensy40.ld",
@@ -11,4 +11,3 @@
   ],
   "flash-command": "teensy_loader_cli -mmcu=imxrt1062 -v -w {hex}"
 }
-

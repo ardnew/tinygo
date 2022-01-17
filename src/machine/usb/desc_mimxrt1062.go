@@ -1,3 +1,4 @@
+//go:build mimxrt1062
 // +build mimxrt1062
 
 package usb
@@ -16,7 +17,7 @@ const descCDCACMCount = 1
 
 // descHIDCount defines the number of USB cores that may be configured as a
 // composite (keyboard + mouse + joystick) human interface device (HID).
-const descHIDCount = 0
+const descHIDCount = 1
 
 // General USB device identification constants.
 const (
