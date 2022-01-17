@@ -1,10 +1,10 @@
+//go:build teensy40
 // +build teensy40
 
 package machine
 
 import (
 	"device/nxp"
-	"machine/usb"
 	"runtime/interrupt"
 )
 
@@ -104,15 +104,6 @@ func init() {
 	_UART6.Interrupt = interrupt.New(nxp.IRQ_LPUART1, _UART6.handleInterrupt)
 	_UART7.Interrupt = interrupt.New(nxp.IRQ_LPUART7, _UART7.handleInterrupt)
 }
-
-// #=====================================================#
-// |                        USB                          |
-// #=====================================================#
-var (
-	UART0 = usb.UART{Port: 0}
-	// HID0  = usb.HID{Port: 0}
-	// UART0 = &UART1
-)
 
 // #=====================================================#
 // |                        UART                         |

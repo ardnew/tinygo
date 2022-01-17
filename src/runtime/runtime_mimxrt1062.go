@@ -1,3 +1,4 @@
+//go:build mimxrt1062
 // +build mimxrt1062
 
 package runtime
@@ -6,7 +7,6 @@ import (
 	"device/arm"
 	"device/nxp"
 	"machine"
-	"machine/usb"
 	"math/bits"
 	"unsafe"
 )
@@ -107,8 +107,7 @@ func initPeripherals() {
 	initPins()        // configure GPIO
 
 	enablePeripheralClocks() // activate peripheral clock gates
-	initUSB()                // configure USB CDC-ACM (UART0)
-	initUART()               // configure hardware UART (UART1)
+	initUART()               // configure Serial interface
 }
 
 func initPins() {
@@ -120,17 +119,11 @@ func initPins() {
 }
 
 func initUART() {
-	machine.UART1.Configure(machine.UARTConfig{})
-}
-
-func initUSB() {
-	// machine.HID0.Configure(usb.HIDConfig{})
-	machine.UART0.Configure(usb.UARTConfig{})
+	machine.Serial.Configure(machine.UARTConfig{})
 }
 
 func putchar(c byte) {
-	machine.UART0.WriteByte(c) // print to USB UART
-	// machine.UART1.WriteByte(c) // print to hardware UART
+	machine.Serial.WriteByte(c)
 }
 
 func exit(code int) {

@@ -1,12 +1,17 @@
 package main
 
 import (
-	"machine"
 	"machine/usb"
 	"time"
 )
 
-var keyboard = machine.HID0.Keyboard()
+var keyboard *usb.Keyboard
+
+func init() {
+	hid := usb.HID{Port: 0}
+	hid.Configure(usb.HIDConfig{})
+	keyboard = hid.Keyboard()
+}
 
 func main() {
 
