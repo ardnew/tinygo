@@ -26,7 +26,8 @@ func init() {
 	initRTC()
 	initSERCOMClocks()
 	initADCClock()
-	initUSB()
+
+	machine.InitUSB(0)
 }
 
 func putchar(c byte) {
