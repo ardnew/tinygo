@@ -7,7 +7,6 @@ import (
 	"device/arm"
 	"device/nxp"
 	"machine"
-	"machine/usb"
 	"math/bits"
 	"unsafe"
 )
@@ -108,8 +107,7 @@ func initPeripherals() {
 	initPins()        // configure GPIO
 
 	enablePeripheralClocks() // activate peripheral clock gates
-	initUSB()                // configure USB CDC-ACM (UART0)
-	initUART()               // configure hardware UART (UART1)
+	machine.InitUSB()
 }
 
 func initPins() {
@@ -118,15 +116,6 @@ func initPins() {
 	nxp.IOMUXC_GPR.GPR27.Set(0xFFFFFFFF)
 	nxp.IOMUXC_GPR.GPR28.Set(0xFFFFFFFF)
 	nxp.IOMUXC_GPR.GPR29.Set(0xFFFFFFFF)
-}
-
-func initUART() {
-	machine.Serial.Configure(machine.UARTConfig{})
-}
-
-func initUSB() {
-	// machine.HID0.Configure(usb.HIDConfig{})
-	machine.UART0.Configure(usb.UARTConfig{})
 }
 
 func putchar(c byte) {

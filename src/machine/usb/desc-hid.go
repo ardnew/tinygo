@@ -94,6 +94,8 @@ const (
 	descHIDConfigAttrMediaKey = descEndptConfigAttrTxInterrupt | descEndptConfigAttrRxUnused
 )
 
+const descInterfaceCount = descHIDInterfaceCount
+
 // descHIDClass holds references to all descriptors, buffers, and control
 // structures for the USB HID device class.
 type descHIDClass struct {
@@ -108,12 +110,10 @@ type descHIDClass struct {
 // descHID holds statically-allocated instances for each of the HID device class
 // configurations, ordered by index (offset by -1).
 var descHID = [dcdCount]descHIDClass{
-
 	{ // HID class configuration index 1
 		descHIDClassData: &descHIDData[0],
 
 		locale: &[descHIDLanguageCount]descStringLanguage{
-
 			{ // [0x0409] US English
 				language: descLanguageEnglish,
 				descriptor: descStringIndex{

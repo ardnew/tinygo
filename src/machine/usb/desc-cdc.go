@@ -170,6 +170,46 @@ const (
 			descLengthEndpoint) // CDC Data OUT Endpoint Descriptor
 )
 
+// descCDCState defines the state of the CDC-ACM handshake initialization.
+//
+// Many USB hosts will send a default SET_LINE_CODING prior to SET_LINE_STATE,
+// and then another SET_LINE_CODING containing the actual terminal settings.
+//
+// We do not want to start UART Rx/Tx transactions until after we have
+// received the final SET_LINE_CODING with the intended terminal settings.
+// Otherwise, the host may cancel any data transfers occurring during a change
+// in line state or line coding.
+//
+// The "set" method on type descCDCState defines this incremental state
+// machine, with the UART's current state stored in the volatile.Register8
+// field "st" of descCDCClassData.
+type descCDCState uint8
+
+// set implements the state transition logic described in the godoc comment on
+// type descCDCState. Returns the value of the resulting state.
+//
+//go:inline
+func (s *descCDCState) set(state descCDCState) descCDCState {
+	if state > *s {
+		// state must be incremented in-order. Otherwise, reset to initial state.
+		if state == *s+1 {
+			*s = state
+		} else {
+			var init descCDCState // Reset to zero-value of type.
+			*s = init
+		}
+	}
+	// Return a value for safely chaining the result.
+	//   (Not a pointer to the object we just modified.)
+	return *s
+}
+
+const (
+	descCDCStateConfigured descCDCState = iota // Received SET_CONFIGURATION class request
+	descCDCStateLineState                      // Received SET_LINE_STATE after Configured state
+	descCDCStateLineCoding                     // Received SET_LINE_CODING after LineState state
+)
+
 // descCDCLineCodingSize defines the length of a CDC-ACM UART line coding
 // buffer. Note that the actual buffer may be padded for alignment; but for
 // Rx/Tx transfer purposes, descCDCLineCodingSize defines the number of bytes
@@ -241,6 +281,8 @@ const (
 	descCDCConfigAttrDataTx = descEndptConfigAttrRxUnused | descEndptConfigAttrTxBulk
 )
 
+const descInterfaceCount = descCDCInterfaceCount
+
 // descCDCClass holds references to all descriptors, buffers, and control
 // structures for the USB CDC-ACM (single) device class.
 type descCDCClass struct {
@@ -255,12 +297,10 @@ type descCDCClass struct {
 // descCDC holds statically-allocated instances for each of the CDC-ACM
 // (single) device class configurations, ordered by index (offset by -1).
 var descCDC = [dcdCount]descCDCClass{
-
 	{ // CDC-ACM (single) class configuration index 1
 		descCDCClassData: &descCDCData[0],
 
 		locale: &[descCDCLanguageCount]descStringLanguage{
-
 			{ // [0x0409] US English
 				language: descLanguageEnglish,
 				descriptor: descStringIndex{

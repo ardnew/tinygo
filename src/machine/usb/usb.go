@@ -46,7 +46,6 @@ const (
 // port at given index, if available. Returns a reference to the initialized
 // core or nil if the core is unavailable.
 func initCore(port int, speed Speed, class class) (*core, status) {
-
 	if port < 0 || port >= CoreCount || 0 == class.config {
 		return nil, statusInvalid
 	}
@@ -125,6 +124,7 @@ const (
 )
 
 // mode returns the USB core operating mode of the receiver class c.
+//
 //go:inline
 func (c class) mode() int {
 	switch c.id {
@@ -137,6 +137,7 @@ func (c class) mode() int {
 
 // equals returns true if and only if all fields of the given class are equal to
 // those of the receiver c.
+//
 //go:inline
 func (c class) equals(class class) bool {
 	return c.id == class.id && c.config == class.config
@@ -154,5 +155,6 @@ const (
 )
 
 // ok returns true if and only if the receiver st equals statusOK.
+//
 //go:inline
 func (s status) ok() bool { return statusOK == s }

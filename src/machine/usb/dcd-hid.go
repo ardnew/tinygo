@@ -9,7 +9,7 @@ import "unsafe"
 func (d *dcd) endpointMaxPacketSize(endpoint uint8) uint32 {
 	switch endpointNumber(endpoint) {
 	case descHIDEndpointCtrl:
-		return descControlPacketSize
+		return descEndptMaxPktSize
 	case descHIDEndpointKeyboard:
 		return descHIDKeyboardTxPacketSize
 	case descHIDEndpointMouse:
@@ -26,7 +26,7 @@ func (d *dcd) endpointMaxPacketSize(endpoint uint8) uint32 {
 	case descHIDEndpointMediaKey:
 		return descHIDMediaKeyTxPacketSize
 	}
-	return descControlPacketSize
+	return descEndptMaxPktSize
 }
 
 //go:inline
@@ -43,7 +43,6 @@ func (d *dcd) controlSetConfiguration() {
 }
 
 func (d *dcd) controlClassRequest(sup dcdSetup) dcdStage {
-
 	// Switch on the recepient and direction of the request
 	switch sup.bmRequestType &
 		(descRequestTypeRecipientMsk | descRequestTypeDirMsk) {
@@ -122,7 +121,6 @@ func (d *dcd) controlGetInterfaceDescriptor(sup dcdSetup) bool {
 }
 
 func (d *dcd) controlGetDescriptor(sup dcdSetup) {
-
 	hid := &descHID[d.cc.config-1]
 	dxn := uint8(0)
 	pos := uint8(0)
@@ -164,7 +162,6 @@ func (d *dcd) controlGetDescriptor(sup dcdSetup) {
 			sd = hid.locale[code].descriptor[sup.wValue&0xFF][:]
 
 		} else {
-
 			// setup.wIndex now contains a language code, which we specified in a
 			// previous request (above: setup.wValue = [0x03]00). We need to locate
 			// the set of strings whose language matches the language code given in
@@ -299,7 +296,6 @@ func (d *dcd) controlGetDescriptor(sup dcdSetup) {
 
 // controlComplete handles the setup completion of control endpoint 0.
 func (d *dcd) controlComplete() {
-
 	// First, switch on the type of request (standard, class, or vendor)
 	switch d.setup.bmRequestType & descRequestTypeTypeMsk {
 

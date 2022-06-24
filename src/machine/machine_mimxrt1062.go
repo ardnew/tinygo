@@ -726,7 +726,8 @@ func (p Pin) getPad() (pad *volatile.Register32, mux *volatile.Register32) {
 //
 // The reference manual refers to this functionality as a "Daisy Chain". The
 // associated docs are found in the i.MX RT1060 Processor Reference Manual:
-//   "Chapter 11.3.3 Daisy chain - multi pads driving same module input pin"
+//
+//	"Chapter 11.3.3 Daisy chain - multi pads driving same module input pin"
 type muxSelect struct {
 	mux uint8                // AF mux selection (NOT a Pin type)
 	sel *volatile.Register32 // AF selection register
@@ -884,6 +885,8 @@ func (p Pin) getMuxMode(config PinConfig) uint32 {
 	}
 }
 
+func initUSB() {}
+
 // maximum ADC value for the currently configured resolution (used for scaling)
 var adcMaximum uint32
 
@@ -957,8 +960,7 @@ func (a ADC) Get() uint16 {
 	return 0
 }
 
-// mode constructs bit masks for mode and average - used in ADC configuration
-// registers - from a given ADC bit size (resolution) and sample count.
+// mode constructs bit masks for mode and average - used in ADC config// registers - from a given ADC bit size (resolution) and sample count.
 func (a ADC) mode(resolution, samples uint32) (mode, average uint32) {
 
 	// use asynchronous clock (ADACK) (0 = IPG, 1 = IPG/2, or 3 = ADACK)

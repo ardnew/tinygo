@@ -14,6 +14,7 @@ func (d *dhw) descriptorTable() uintptr {
 // endpointDescriptor returns the endpoint descriptor for the given endpoint
 // address, encoded as direction D and endpoint number N with the 8-bit mask
 // D000NNNN.
+//
 //go:inline
 func (d *dhw) endpointDescriptor(endpoint uint8) *dhwEPDesc {
 	num, dir := unpackEndpoint(endpoint)
@@ -42,7 +43,6 @@ func (d *dhw) controlStatusBuffer(data []uint8) uintptr {
 // =============================================================================
 
 func (d *dhw) cdcConfigure() {
-
 	acm := &descCDC[d.cc.config-1]
 
 	acm.setState(descCDCStateConfigured)
@@ -202,7 +202,6 @@ func (d *dhw) cdcWriteByte(c uint8) error {
 }
 
 func (d *dhw) cdcWrite(data []uint8) (int, error) {
-
 	acm := &descCDC[d.cc.config-1]
 	num := uint16(descCDCEndpointDataTx) & descEndptAddrNumberMsk
 

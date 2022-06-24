@@ -18,7 +18,7 @@ import (
 // dhwInterruptPriority defines the priority for all USB device interrupts.
 const dhwInterruptPriority = 3
 
-// dhw implements USB device controller hardware abstraction for iMXRT1062.
+// dhw implements USB device controller hardware abstraction for SAMx51.
 type dhw struct {
 	*dcd // USB device controller driver
 
@@ -52,18 +52,14 @@ func allocDHW(port, instance int, speed Speed, dc *dcd) *dhw {
 	case 0:
 		dhwInstance[instance].dcd = dc
 		dhwInstance[instance].bus = sam.USB_DEVICE
-		dhwInstance[instance].irqEVT =
-			interrupt.New(sam.IRQ_USB_OTHER,
-				func(interrupt.Interrupt) { coreInstance[0].dc.interrupt() })
-		dhwInstance[instance].irqSOF =
-			interrupt.New(sam.IRQ_USB_SOF_HSOF,
-				func(interrupt.Interrupt) { coreInstance[0].dc.interrupt() })
-		dhwInstance[instance].irqTC0 =
-			interrupt.New(sam.IRQ_USB_TRCPT0,
-				func(interrupt.Interrupt) { coreInstance[0].dc.interrupt() })
-		dhwInstance[instance].irqTC1 =
-			interrupt.New(sam.IRQ_USB_TRCPT1,
-				func(interrupt.Interrupt) { coreInstance[0].dc.interrupt() })
+		dhwInstance[instance].irqEVT = interrupt.New(sam.IRQ_USB_OTHER,
+			func(interrupt.Interrupt) { coreInstance[0].dc.interrupt() })
+		dhwInstance[instance].irqSOF = interrupt.New(sam.IRQ_USB_SOF_HSOF,
+			func(interrupt.Interrupt) { coreInstance[0].dc.interrupt() })
+		dhwInstance[instance].irqTC0 = interrupt.New(sam.IRQ_USB_TRCPT0,
+			func(interrupt.Interrupt) { coreInstance[0].dc.interrupt() })
+		dhwInstance[instance].irqTC1 = interrupt.New(sam.IRQ_USB_TRCPT1,
+			func(interrupt.Interrupt) { coreInstance[0].dc.interrupt() })
 	}
 
 	// SAMx51 has only one USB PHY, which is full-speed
@@ -79,49 +75,48 @@ func allocDHW(port, instance int, speed Speed, dc *dcd) *dhw {
 // Calibrate DP/DM pads using value from NVM. Based on the following from
 // Atmel's CMSIS 1.2.2 for SAMD51:
 //
-//	 ... NOTE: These register defines are used to obtain calibration parameters
-//  |
-//  | #define NVMCTRL_SW0                   (0x00800080UL) /**< \brief (NVMCTRL) SW0 Base Address *
-//  |
-//   ...
-//  |
-//  | #define USB_FUSES_TRANSN_ADDR       (NVMCTRL_SW0 + 4)
-//  | #define USB_FUSES_TRANSN_Pos        0            /**< \brief (NVMCTRL_SW0) USB pad Transn calibration */
-//  | #define USB_FUSES_TRANSN_Msk        (_Ul(0x1F) << USB_FUSES_TRANSN_Pos)
-//  | #define USB_FUSES_TRANSN(value)     (USB_FUSES_TRANSN_Msk & ((value) << USB_FUSES_TRANSN_Pos))
-//  |
-//  | #define USB_FUSES_TRANSP_ADDR       (NVMCTRL_SW0 + 4)
-//  | #define USB_FUSES_TRANSP_Pos        5            /**< \brief (NVMCTRL_SW0) USB pad Transp calibration */
-//  | #define USB_FUSES_TRANSP_Msk        (_Ul(0x1F) << USB_FUSES_TRANSP_Pos)
-//  | #define USB_FUSES_TRANSP(value)     (USB_FUSES_TRANSP_Msk & ((value) << USB_FUSES_TRANSP_Pos))
-//  |
-//  | #define USB_FUSES_TRIM_ADDR         (NVMCTRL_SW0 + 4)
-//  | #define USB_FUSES_TRIM_Pos          10           /**< \brief (NVMCTRL_SW0) USB pad Trim calibration */
-//  | #define USB_FUSES_TRIM_Msk          (_Ul(0x7) << USB_FUSES_TRIM_Pos)
-//  | #define USB_FUSES_TRIM(value)       (USB_FUSES_TRIM_Msk & ((value) << USB_FUSES_TRIM_Pos))
-//  |
-//   ...
-//  |
-//  | typedef union {
-//  |   struct {
-//  |     uint16_t TRANSP:5;         /*!< bit:  0.. 4  USB Pad Transp calibration         */
-//  |     uint16_t :1;               /*!< bit:      5  Reserved                           */
-//  |     uint16_t TRANSN:5;         /*!< bit:  6..10  USB Pad Transn calibration         */
-//  |     uint16_t :1;               /*!< bit:     11  Reserved                           */
-//  |     uint16_t TRIM:3;           /*!< bit: 12..14  USB Pad Trim calibration           */
-//  |     uint16_t :1;               /*!< bit:     15  Reserved                           */
-//  |   } bit;                       /*!< Structure used for bit  access                  */
-//  |   uint16_t reg;                /*!< Type      used for register access              */
-//  | } USB_PADCAL_Type;
-//  |
-//   ... NOTE: The following is where USB pad calibration actually occurrs:
-//  |
-//  | USB->DEVICE.PADCAL.bit.TRANSP = (*((uint32_t*) USB_FUSES_TRANSP_ADDR) & USB_FUSES_TRANSP_Msk) >> USB_FUSES_TRANSP_Pos;
-//  | USB->DEVICE.PADCAL.bit.TRANSN = (*((uint32_t*) USB_FUSES_TRANSN_ADDR) & USB_FUSES_TRANSN_Msk) >> USB_FUSES_TRANSN_Pos;
-//  | USB->DEVICE.PADCAL.bit.TRIM   = (*((uint32_t*) USB_FUSES_TRIM_ADDR) & USB_FUSES_TRIM_Msk) >> USB_FUSES_TRIM_Pos;
-//  |
-//   ...
-//
+//		 ... NOTE: These register defines are used to obtain calibration parameters
+//	 |
+//	 | #define NVMCTRL_SW0                   (0x00800080UL) /**< \brief (NVMCTRL) SW0 Base Address *
+//	 |
+//	  ...
+//	 |
+//	 | #define USB_FUSES_TRANSN_ADDR       (NVMCTRL_SW0 + 4)
+//	 | #define USB_FUSES_TRANSN_Pos        0            /**< \brief (NVMCTRL_SW0) USB pad Transn calibration */
+//	 | #define USB_FUSES_TRANSN_Msk        (_Ul(0x1F) << USB_FUSES_TRANSN_Pos)
+//	 | #define USB_FUSES_TRANSN(value)     (USB_FUSES_TRANSN_Msk & ((value) << USB_FUSES_TRANSN_Pos))
+//	 |
+//	 | #define USB_FUSES_TRANSP_ADDR       (NVMCTRL_SW0 + 4)
+//	 | #define USB_FUSES_TRANSP_Pos        5            /**< \brief (NVMCTRL_SW0) USB pad Transp calibration */
+//	 | #define USB_FUSES_TRANSP_Msk        (_Ul(0x1F) << USB_FUSES_TRANSP_Pos)
+//	 | #define USB_FUSES_TRANSP(value)     (USB_FUSES_TRANSP_Msk & ((value) << USB_FUSES_TRANSP_Pos))
+//	 |
+//	 | #define USB_FUSES_TRIM_ADDR         (NVMCTRL_SW0 + 4)
+//	 | #define USB_FUSES_TRIM_Pos          10           /**< \brief (NVMCTRL_SW0) USB pad Trim calibration */
+//	 | #define USB_FUSES_TRIM_Msk          (_Ul(0x7) << USB_FUSES_TRIM_Pos)
+//	 | #define USB_FUSES_TRIM(value)       (USB_FUSES_TRIM_Msk & ((value) << USB_FUSES_TRIM_Pos))
+//	 |
+//	  ...
+//	 |
+//	 | typedef union {
+//	 |   struct {
+//	 |     uint16_t TRANSP:5;         /*!< bit:  0.. 4  USB Pad Transp calibration         */
+//	 |     uint16_t :1;               /*!< bit:      5  Reserved                           */
+//	 |     uint16_t TRANSN:5;         /*!< bit:  6..10  USB Pad Transn calibration         */
+//	 |     uint16_t :1;               /*!< bit:     11  Reserved                           */
+//	 |     uint16_t TRIM:3;           /*!< bit: 12..14  USB Pad Trim calibration           */
+//	 |     uint16_t :1;               /*!< bit:     15  Reserved                           */
+//	 |   } bit;                       /*!< Structure used for bit  access                  */
+//	 |   uint16_t reg;                /*!< Type      used for register access              */
+//	 | } USB_PADCAL_Type;
+//	 |
+//	  ... NOTE: The following is where USB pad calibration actually occurrs:
+//	 |
+//	 | USB->DEVICE.PADCAL.bit.TRANSP = (*((uint32_t*) USB_FUSES_TRANSP_ADDR) & USB_FUSES_TRANSP_Msk) >> USB_FUSES_TRANSP_Pos;
+//	 | USB->DEVICE.PADCAL.bit.TRANSN = (*((uint32_t*) USB_FUSES_TRANSN_ADDR) & USB_FUSES_TRANSN_Msk) >> USB_FUSES_TRANSN_Pos;
+//	 | USB->DEVICE.PADCAL.bit.TRIM   = (*((uint32_t*) USB_FUSES_TRIM_ADDR) & USB_FUSES_TRIM_Msk) >> USB_FUSES_TRIM_Pos;
+//	 |
+//	  ...
 func (d *dhw) calibrate() {
 	const reg = 0x00800080 + 4 // NVMCTRL_SW0 + 4
 	cal := *(*uint16)(unsafe.Pointer(uintptr(reg)))
@@ -135,7 +130,6 @@ func (d *dhw) calibrate() {
 // endpoint and transfer descriptor data structures, initializing core registers
 // and interrupts, resetting the USB PHY, and enabling power on the bus.
 func (d *dhw) init() status {
-
 	// Enable USB clocks
 	// const clockGenerator = sam.GCLK_PCHCTRL_GEN_GCLK10
 	const clockGenerator = sam.PCHCTRL_GCLK_USB
@@ -249,7 +243,6 @@ func (d *dhw) enableSOF(enable bool, iface uint8) {
 // notifies the device controller driver using a common "virtual interrupt"
 // code.
 func (d *dhw) interrupt() {
-
 	status := d.bus.INTFLAG.Get() & d.bus.INTENSET.Get()
 
 	if status&sam.USB_DEVICE_INTFLAG_SOF != 0 {
@@ -391,7 +384,6 @@ func (d *dhw) interrupt() {
 			}
 		}
 	}
-
 }
 
 // prepareSetup configures the buffer for setup packets received on control
@@ -410,7 +402,6 @@ func (d *dhw) prepareSetup() {
 }
 
 func (d *dhw) setDeviceAddress(addr uint16) {
-
 	// SAMx51 can only set address after status for this request is complete,
 	// which is checked in (*dhw).controlStatusComplete(dcdSetup).
 
@@ -444,7 +435,6 @@ func (d *dhw) controlStall(stall bool, dir uint8) {
 }
 
 func (d *dhw) controlStatusStart(endpoint uint8) {
-
 	num, dir := unpackEndpoint(endpoint)
 
 	// Swap direction of the given endpoint Rx->Tx and Tx->Rx
@@ -458,7 +448,6 @@ func (d *dhw) controlStatusStart(endpoint uint8) {
 }
 
 func (d *dhw) controlStatusComplete(endpoint uint8) {
-
 	if (d.setup.bmRequestType&descRequestTypeTypeMsk == descRequestTypeTypeStandard) &&
 		(d.setup.bmRequestType&(descRequestTypeRecipientMsk|descRequestTypeDirMsk) ==
 			descRequestTypeRecipientDevice|descRequestTypeDirOut) &&
@@ -473,7 +462,6 @@ func (d *dhw) controlStatusComplete(endpoint uint8) {
 }
 
 func (d *dhw) controlTransferStart(endpoint uint8) {
-
 	num, dir := unpackEndpoint(endpoint)
 
 	// Dequeue the next transfer descriptor available.
@@ -491,7 +479,6 @@ func (d *dhw) controlTransferStart(endpoint uint8) {
 }
 
 func (d *dhw) controlTransferContinue(endpoint uint8, count, total uint32) {
-
 	num, dir := unpackEndpoint(endpoint)
 
 	if xfer, ok := d.ep[num][dir].activeTransfer(); ok {
@@ -504,7 +491,6 @@ func (d *dhw) controlTransferContinue(endpoint uint8, count, total uint32) {
 }
 
 func (d *dhw) controlTransferComplete(endpoint uint8, count, total uint32) {
-
 	num, dir := unpackEndpoint(endpoint)
 	setupDir := d.setup.direction()
 	setupAddress := packEndpoint(num, setupDir)
@@ -647,7 +633,6 @@ func (t *dhwTransfer) hasPayload() bool      { return t.hasDataPayload() || t.ha
 //   - Once the transfer descriptor's table index is read from the xferQueue
 //     channel, the descriptor is cleared in the xferTable, marking it free for
 //     use with a subsequent transfer request.
-//
 type dhwEPStatus struct {
 	device     *dhw
 	endpoint   uint8
@@ -809,8 +794,9 @@ func (s *dhwEPStatus) pendingTransfer() (*dhwTransfer, bool) {
 // vacant index has been processed.
 //
 // ( Because of this potentially danerous behavior, claimSchedule should be
-//   restricted to the scheduling methods — scheduleTransfer and scheduleSetup —
-//   so it can be verified easily that interrupts get re-enabled in all cases. )
+//
+//	restricted to the scheduling methods — scheduleTransfer and scheduleSetup —
+//	so it can be verified easily that interrupts get re-enabled in all cases. )
 func (s *dhwEPStatus) claimSchedule() (int, bool) {
 	// Disable interrupts while scanning the xferTable
 	s.device.enableInterrupts(false)
@@ -922,6 +908,7 @@ const (
 // pcksize is a convenience routine that constructs the bitfields of the PCKSIZE
 // register of the USB_DEVICE peripheral, whose Pos/Msk definitions were ommitted
 // from the SVD-generated device file.
+//
 //go:inline
 func pcksize(byteCount, multiPacketSize, size uint32, zlp bool) uint32 {
 	var zlpMask uint32
@@ -968,6 +955,7 @@ var (
 //
 // See documentation on endpoint descriptor bank SRAM register PCKSIZE, bit
 // field SIZE for details.
+//
 //go:inline
 func endpointSizeEncode(size uint32) (enum uint32, ok bool) {
 	enum, ok = endpointSizeEnum[size]
@@ -979,6 +967,7 @@ func endpointSizeEncode(size uint32) (enum uint32, ok bool) {
 //
 // See documentation on endpoint descriptor bank SRAM register PCKSIZE, bit
 // field SIZE for details.
+//
 //go:inline
 func endpointSizeDecode(enum uint32) (size uint32, ok bool) {
 	if ok = int(enum) < len(endpointEnumSize); ok {
@@ -990,6 +979,7 @@ func endpointSizeDecode(enum uint32) (size uint32, ok bool) {
 // endpointDescriptors returns the OUT + IN endpoint descriptors for the given
 // endpoint number, encoded as direction D and endpoint number N with the 8-bit
 // mask D000NNNN. The direction bit D is ignored.
+//
 //go:inline
 func (d *dhw) endpointDescriptors(endpoint uint8) (out, in *dhwEPDesc) {
 	// endpoint descriptor is device class-specific
@@ -998,7 +988,6 @@ func (d *dhw) endpointDescriptors(endpoint uint8) (out, in *dhwEPDesc) {
 }
 
 func (d *dhw) endpointEnable(endpoint uint8, control bool, config uint32) {
-
 	if control {
 
 		// Configure control endpoint 0 Rx (bank 0, OUT) and Tx (bank 1, IN)
@@ -1104,7 +1093,6 @@ func (d *dhw) endpointConfigure(endpoint uint8, callback func(endpoint uint8, si
 
 // endpointStall sets or clears a stall on the given endpoint.
 func (d *dhw) endpointStall(endpoint uint8, stall bool) {
-
 	if stall {
 		switch endpoint {
 		case rxEndpoint(endpoint):
@@ -1149,7 +1137,6 @@ func (d *dhw) endpointClearFeature(endpoint uint8) {
 }
 
 func (d *dhw) endpointTransfer(endpoint uint8, data uintptr, size uint32) {
-
 	desc := d.endpointDescriptor(endpoint)
 	desc.address.Set(uint32(data))
 
@@ -1192,5 +1179,4 @@ func (d *dhw) endpointTransfer(endpoint uint8, data uintptr, size uint32) {
 
 // endpointComplete handles transfer completion of a data endpoint.
 func (d *dhw) endpointComplete(endpoint uint8, size uint32) {
-
 }
