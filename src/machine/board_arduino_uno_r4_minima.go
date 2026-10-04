@@ -101,3 +101,14 @@ const (
 	ADC_CH21_PIN Pin = A4
 	ADC_CH22_PIN Pin = A5
 )
+
+// UART1 is on the D0/D1 header pins.
+var (
+	UART1       = sci2UART
+	DefaultUART = UART1
+)
+
+func init() {
+	UART1.defaultTX = UART1_TX_PIN
+	UART1.defaultRX = UART1_RX_PIN
+}
