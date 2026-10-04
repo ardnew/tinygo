@@ -139,7 +139,12 @@ func (uart *UART) unlinkStaleEvents() {
 
 // SetBaudRate programs CKS and BRR for the requested baud rate.
 // With ABCS=1 and BGDM=1 the divisor is 8*4^CKS. See R01UH0887 table 28.10.
+// SMR and BRR must be written with TE and RE cleared. See R01UH0887 28.3.7.
 func (uart *UART) SetBaudRate(br uint32) {
+	scr := uart.Bus.SCR.Get()
+	uart.Bus.SCR.Set(0)
+	defer uart.Bus.SCR.Set(scr)
+
 	divisor := uint32(8)
 	for cks := uint32(0); cks < 4; cks++ {
 		n := (sciClockFrequency + divisor*br/2) / (divisor * br)
