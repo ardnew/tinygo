@@ -102,3 +102,23 @@ const (
 	ADC_CH21_PIN Pin = A4
 	ADC_CH22_PIN Pin = A5
 )
+
+// UART1 goes to the ESP32-S3 module, which bridges it to the USB CDC port.
+// UART2 is on the D0/D1 header pins.
+// UART3 goes to the ESP32-S3 AT command interface (SerialNina in the Arduino core).
+// See uno-r4-wifi-usb-bridge UNOR4USBBridge.ino lines 5-6 and 157-160.
+var (
+	UART1       = sci9UART
+	UART2       = sci2UART
+	UART3       = sci1UART
+	DefaultUART = UART1
+)
+
+func init() {
+	UART1.defaultTX = UART1_TX_PIN
+	UART1.defaultRX = UART1_RX_PIN
+	UART2.defaultTX = UART2_TX_PIN
+	UART2.defaultRX = UART2_RX_PIN
+	UART3.defaultTX = UART3_TX_PIN
+	UART3.defaultRX = UART3_RX_PIN
+}
